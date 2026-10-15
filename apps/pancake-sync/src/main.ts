@@ -42,7 +42,7 @@ async function main() {
 				if (error instanceof PancakeApiError && error.retryAfterMs > 0)
 					retryAt.set(shop.id, Date.now() + error.retryAfterMs);
 				process.stderr.write(
-					`${JSON.stringify({ shopId: shop.id, errorCode: safeErrorCode(error) })}\n`,
+					`${JSON.stringify({ shopId: shop.id, errorCode: safeErrorCode(error instanceof PancakeApiError ? error : null) })}\n`,
 				);
 			}
 		}

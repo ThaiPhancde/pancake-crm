@@ -114,9 +114,7 @@ export async function syncResource(
 								watermark: end,
 								windowStart: null,
 								windowEnd: null,
-								...(cursor.phase !== "incremental"
-									? { lastFullScanAt: end }
-									: {}),
+								lastFullScanAt: cursor.phase !== "incremental" ? end : undefined,
 							}
 						: { nextPage: cursor.nextPage + 1 },
 				});
@@ -222,7 +220,7 @@ export async function syncShop(
 								job.attempts + 1 >= PANCAKE.webhookMaxAttempts
 									? "dead"
 									: "pending",
-							lastError: safeErrorCode(error),
+							lastError: safeErrorCode(error instanceof PancakeApiError ? error : null),
 							dueAt: new Date(
 								Date.now() +
 									Math.min(
@@ -234,7 +232,7 @@ export async function syncShop(
 					});
 				if (error instanceof PancakeApiError && error.code === "HTTP_429")
 					throw error;
-				failures.push(`${resource}:${safeErrorCode(error)}`);
+				failures.push(`${resource}:${safeErrorCode(error instanceof PancakeApiError ? error : null)}`);
 			}
 		}
 		await db.$transaction([
@@ -264,10 +262,10 @@ export async function syncShop(
 			locked: false,
 			pages,
 			records,
-			...(failures.length ? { errorCode: failures.join(",") } : {}),
+			errorCode: failures.length ? failures.join(",") : undefined,
 		};
 	} catch (error) {
-		const errorCode = safeErrorCode(error);
+		const errorCode = safeErrorCode(error instanceof PancakeApiError ? error : null);
 		await db.pancakeShop.update({
 			where: { id: shop.id },
 			data: { lastError: errorCode },
@@ -298,7 +296,6 @@ export async function syncShop(
 	}
 }
 
-export function safeErrorCode(error: unknown): string {
-	if (error instanceof PancakeApiError) return error.code;
-	return "PAYLOAD_OR_DATABASE_ERROR";
+export function safeErrorCode(error: PancakeApiError | null): string {
+	return error?.code ?? "PAYLOAD_OR_DATABASE_ERROR";
 }

@@ -53,7 +53,8 @@ try {
 			update: {
 				...shop,
 				fixtureVerifiedAt: new Date(evidence.checkedAt),
-				...(approved ? { enabled: true, liveApprovedAt: new Date() } : {}),
+				enabled: approved ? true : undefined,
+				liveApprovedAt: approved ? new Date() : undefined,
 			},
 		});
 		process.stdout.write(

@@ -23,13 +23,13 @@ export interface PancakeReader {
 
 export function pagePath(shopId: string, request: PageRequest): string {
 	const { resource, page, start, end } = request;
-	const endpoints: { [key in Resource]: string } = {
+	const endpoints = {
 		employees: "users",
 		customers: "customers",
 		products: "products/variations",
 		orders: "orders",
 		returns: "orders_returned",
-	};
+	} as const satisfies Record<Resource, string>;
 	const params = new URLSearchParams();
 	if (resource !== "employees") {
 		params.set(resource === "returns" ? "page" : "page_number", String(page));

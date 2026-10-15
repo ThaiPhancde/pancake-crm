@@ -17,17 +17,17 @@ export const PANCAKE = {
 	maxListSize: 100,
 	timezone: "Asia/Ho_Chi_Minh",
 	// Fallback when an order carries no order_currency.
-	shopCurrency: {
-		"1635200759": "AED",
-		"1328205216": "SAR",
-		"1328205226": "KWD",
-	} as { [shopId: string]: string | undefined },
+	shopCurrency: new Map([
+		["1635200759", "AED"],
+		["1328205216", "SAR"],
+		["1328205226", "KWD"],
+	]),
 	// Dial codes, so 0553409828 and 971553409828 read as the same number.
-	shopDialCode: {
-		"1635200759": "971",
-		"1328205216": "966",
-		"1328205226": "965",
-	} as { [shopId: string]: string | undefined },
+	shopDialCode: new Map([
+		["1635200759", "971"],
+		["1328205216", "966"],
+		["1328205226", "965"],
+	]),
 	databaseNames: ["CRM", "comp_ai_crm", "comp_ai_crm_test", "comp_ai_crm_demo"],
 } as const;
 
@@ -40,25 +40,25 @@ export const RESOURCES = [
 ] as const;
 export type Resource = (typeof RESOURCES)[number];
 
-export const STATUS_NAMES: { [status: number]: string } = {
-	0: "Mới",
-	17: "Chờ xác nhận",
-	11: "Chờ hàng",
-	12: "Chờ in",
-	13: "Đã in",
-	20: "Đã đặt hàng",
-	1: "Đã xác nhận",
-	8: "Đang đóng hàng",
-	9: "Chờ chuyển hàng",
-	2: "Đã gửi hàng",
-	3: "Đã nhận",
-	16: "Đã thu tiền",
-	4: "Đang hoàn",
-	15: "Hoàn một phần",
-	5: "Đã hoàn",
-	6: "Đã hủy",
-	7: "Đã xóa",
-};
+export const STATUS_NAMES = new Map([
+	[0, "Mới"],
+	[17, "Chờ xác nhận"],
+	[11, "Chờ hàng"],
+	[12, "Chờ in"],
+	[13, "Đã in"],
+	[20, "Đã đặt hàng"],
+	[1, "Đã xác nhận"],
+	[8, "Đang đóng hàng"],
+	[9, "Chờ chuyển hàng"],
+	[2, "Đã gửi hàng"],
+	[3, "Đã nhận"],
+	[16, "Đã thu tiền"],
+	[4, "Đang hoàn"],
+	[15, "Hoàn một phần"],
+	[5, "Đã hoàn"],
+	[6, "Đã hủy"],
+	[7, "Đã xóa"],
+]);
 
 export function assertCrmDatabase(url: string): void {
 	const parsed = new URL(url);

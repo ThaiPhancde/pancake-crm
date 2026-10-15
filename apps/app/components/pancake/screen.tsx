@@ -45,8 +45,7 @@ export type PancakeData = {
 };
 
 export function parseFilters(values: SearchValues) {
-	const text = (key: string) =>
-		typeof values[key] === "string" ? values[key] : "";
+	const text = (key: string) => z.string().catch("").parse(values[key]);
 	const from = text("from");
 	const to = text("to");
 	if (from) z.iso.date().parse(from);
@@ -110,8 +109,10 @@ function url(
 	change: { [key: string]: string },
 ): string {
 	const params = new URLSearchParams();
-	for (const [key, value] of Object.entries(values))
-		if (typeof value === "string" && value) params.set(key, value);
+	for (const [key, value] of Object.entries(values)) {
+		const text = z.string().min(1).safeParse(value);
+		if (text.success) params.set(key, text.data);
+	}
 	for (const [key, value] of Object.entries(change)) {
 		if (value) params.set(key, value);
 		else params.delete(key);
@@ -188,8 +189,8 @@ export function PancakeScreen({
 				from={filter.from}
 				to={filter.to}
 				shops={data.shops}
-				statuses={Object.entries(STATUS_NAMES).map(([id, name]) => ({
-					id,
+				statuses={[...STATUS_NAMES].map(([id, name]) => ({
+					id: String(id),
 					name,
 				}))}
 			/>
@@ -252,7 +253,7 @@ export function PancakeScreen({
 									</TableCell>
 									<TableCell>
 										<Badge variant="outline">
-											{STATUS_NAMES[order.status] ??
+											{STATUS_NAMES.get(order.status) ??
 												`Trạng thái ${order.status}`}
 										</Badge>
 									</TableCell>
@@ -323,8 +324,8 @@ export function PancakeScreen({
 									<TableCell>
 										{event.oldStatus === null
 											? "—"
-											: STATUS_NAMES[event.oldStatus]}{" "}
-										→ {STATUS_NAMES[event.status] ?? event.status}
+											: STATUS_NAMES.get(event.oldStatus)}{" "}
+										→ {STATUS_NAMES.get(event.status) ?? event.status}
 									</TableCell>
 									<TableCell>
 										{event.actorId ?? "Không được cung cấp"}

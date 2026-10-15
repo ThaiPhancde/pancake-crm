@@ -134,7 +134,7 @@ export async function storeRecord(
 	}
 	const deliveryStatus = shippingStatus(item);
 	const currency =
-		item.order_currency ?? PANCAKE.shopCurrency[shopId] ?? "VND";
+		item.order_currency ?? PANCAKE.shopCurrency.get(shopId) ?? "VND";
 	const data = {
 		customerId: item.customer?.id ?? null,
 		customerName:

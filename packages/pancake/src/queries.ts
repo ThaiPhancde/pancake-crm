@@ -20,33 +20,23 @@ export function filteredOrders(
 	scope: Prisma.PancakeOrderWhereInput,
 	input: ListInput,
 ): Prisma.PancakeOrderWhereInput {
-	return {
-		AND: [
-			scope,
-			{
-				...(input.status !== undefined ? { status: input.status } : {}),
-				...(input.sellerId ? { sellerId: input.sellerId } : {}),
-				...(input.from || input.to
-					? {
-							sourceCreatedAt: {
-								...(input.from ? { gte: new Date(input.from) } : {}),
-								...(input.to ? { lt: new Date(input.to) } : {}),
-							},
-						}
-					: {}),
-				...(input.q
-					? {
-							OR: [
-								{ orderId: { contains: input.q } },
-								{ customerName: { contains: input.q, mode: "insensitive" } },
-								{ customerPhone: { contains: input.q } },
-								{ trackingCode: { contains: input.q } },
-							],
-						}
-					: {}),
-			},
-		],
+	const created: Prisma.DateTimeFilter = {};
+	if (input.from) created.gte = new Date(input.from);
+	if (input.to) created.lt = new Date(input.to);
+	const filters: Prisma.PancakeOrderWhereInput = {
+		status: input.status,
+		sellerId: input.sellerId || undefined,
+		sourceCreatedAt: input.from || input.to ? created : undefined,
+		OR: input.q
+			? [
+					{ orderId: { contains: input.q } },
+					{ customerName: { contains: input.q, mode: "insensitive" } },
+					{ customerPhone: { contains: input.q } },
+					{ trackingCode: { contains: input.q } },
+				]
+			: undefined,
 	};
+	return { AND: [scope, filters] };
 }
 
 const orderSelect = {
@@ -238,7 +228,7 @@ export async function customerPurchases(
 		throw new PancakeAccessError();
 	// Names collide; phone numbers do not. Match on the national number so
 	// 0553409828 and 971553409828 are one person; fall back to the id.
-	const tail = phoneTail(customer.phone, PANCAKE.shopDialCode[shopId]);
+	const tail = phoneTail(customer.phone, PANCAKE.shopDialCode.get(shopId));
 	const person = tail ? { customerPhone: { endsWith: tail } } : { customerId };
 	const where = filteredOrders({ AND: [scope, person] }, { ...input, shopId });
 	const [rows, total] = await db.$transaction([
@@ -268,15 +258,13 @@ export async function listProducts(db: Db, userId: string, input: ListInput) {
 	orderScope(grants, input.shopId);
 	const where: Prisma.PancakeProductWhereInput = {
 		shopId: input.shopId ?? { in: grants.map((grant) => grant.shopId) },
-		...(input.q
-			? {
-					OR: [
-						{ name: { contains: input.q, mode: "insensitive" } },
-						{ sku: { contains: input.q } },
-						{ productId: { contains: input.q } },
-					],
-				}
-			: {}),
+		OR: input.q
+			? [
+					{ name: { contains: input.q, mode: "insensitive" } },
+					{ sku: { contains: input.q } },
+					{ productId: { contains: input.q } },
+				]
+			: undefined,
 	};
 	const [rows, total] = await db.$transaction([
 		db.pancakeProduct.findMany({
