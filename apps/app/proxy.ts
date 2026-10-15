@@ -16,14 +16,19 @@ const SIGN_IN_PATH = "/sign-in";
 
 const UNGATED = ["/grant-access", "/eve"];
 
-const ANONYMOUS = ["/t"];
+const ANONYMOUS = ["/t", "/pancake-demo"];
 
-const SECTIONS = ["/companies", "/contacts", "/deals", "/settings"];
+const SECTIONS = ["/companies", "/contacts", "/deals", "/settings", "/pancake"];
 
 export async function proxy(request: NextRequest) {
 	const { pathname } = request.nextUrl;
 
 	if (pathname === SIGN_IN_PATH) return NextResponse.next();
+	if (
+		isUnder(pathname, "/pancake-demo") &&
+		process.env.NODE_ENV === "production"
+	)
+		return new NextResponse("Not found", { status: 404 });
 
 	if (isAnonymous(pathname)) return NextResponse.next();
 
@@ -45,9 +50,13 @@ export async function proxy(request: NextRequest) {
 	]);
 
 	if (workspace.gate === "required") return sendTo(ONBOARDING_PATH, request);
-	if (research === "required") return sendTo(RESEARCH_PATH, request);
+	const segments = pathname.split("/").filter(Boolean);
+	const pancake = segments[0] === "pancake" || segments[1] === "pancake";
+	if (research === "required" && !pancake)
+		return sendTo(RESEARCH_PATH, request);
 
-	const settled = workspace.gate === "settled" && research === "settled";
+	const settled =
+		workspace.gate === "settled" && (research === "settled" || pancake);
 
 	if (!settled || !workspace.slug) return NextResponse.next();
 

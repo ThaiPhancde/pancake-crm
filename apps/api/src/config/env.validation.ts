@@ -27,6 +27,10 @@ export class EnvironmentVariables {
 	@Max(65535)
 	PORT = 3001;
 
+	@IsOptional()
+	@IsString()
+	API_HOST?: string;
+
 	@IsString()
 	@MinLength(1, {
 		message:
@@ -126,6 +130,18 @@ export class EnvironmentVariables {
 	@IsOptional()
 	@IsString()
 	CRM_TELEMETRY_DISABLED?: string;
+
+	@IsOptional()
+	@IsString()
+	PANCAKE_LIVE_SYNC_ENABLED?: string;
+
+	@IsOptional()
+	@IsString()
+	PANCAKE_SHOPS_JSON?: string;
+
+	@IsOptional()
+	@IsString()
+	PANCAKE_DEMO_MODE?: string;
 }
 
 export type RawEnvironment = Record<string, string | undefined>;

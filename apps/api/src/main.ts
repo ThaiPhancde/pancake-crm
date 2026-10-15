@@ -6,7 +6,7 @@ async function bootstrap() {
 	app.enableShutdownHooks();
 
 	const port = process.env.PORT ?? 3001;
-	await app.listen(port);
+	await app.listen(port, process.env.API_HOST ?? "0.0.0.0");
 
 	new Logger("Bootstrap").log({
 		message: `API listening on http://localhost:${port}`,

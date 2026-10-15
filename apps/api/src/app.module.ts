@@ -25,6 +25,7 @@ import { HealthModule } from "./health/health.module";
 import { LoggingModule } from "./logging/logging.module";
 import { logAuthRoute } from "./logging/request-logger.middleware";
 import { MailboxModule } from "./mailbox/mailbox.module";
+import { PancakeModule } from "./pancake/pancake.module";
 import { MicrosoftModule } from "./microsoft/microsoft.module";
 import { SavedViewsModule } from "./saved-views/saved-views.module";
 import { SearchModule } from "./search/search.module";
@@ -67,6 +68,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		DashboardModule,
 		SearchModule,
 		MailboxModule,
+		PancakeModule,
 		GoogleModule,
 		MicrosoftModule,
 		SyncModule,

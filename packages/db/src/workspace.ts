@@ -14,6 +14,8 @@ export const DEFAULT_WORKSPACE_SLUG = "workspace";
 export const MAX_SLUG = 48;
 
 export const RESERVED_SLUGS: readonly string[] = [
+	"pancake",
+	"pancake-demo",
 	"_next",
 	"api",
 	"agent",

@@ -1,0 +1,73 @@
+export const PANCAKE = {
+	baseUrl: "https://pos.pages.fm/api/v1",
+	pageSize: 100,
+	timeoutMs: 20_000,
+	attempts: 4,
+	retryMs: 1_000,
+	maxRetryMs: 60_000,
+	requestGapMs: 350,
+	pollMs: 60_000,
+	overlapMs: 300_000,
+	reconcileMs: 86_400_000,
+	pageBudget: 25,
+	transactionMs: 60_000,
+	webhookMaxBytes: 1_048_576,
+	webhookMaxAttempts: 8,
+	webhookBatch: 25,
+	maxListSize: 100,
+	timezone: "Asia/Ho_Chi_Minh",
+	// Fallback when an order carries no order_currency.
+	shopCurrency: {
+		"1635200759": "AED",
+		"1328205216": "SAR",
+		"1328205226": "KWD",
+	} as { [shopId: string]: string | undefined },
+	// Dial codes, so 0553409828 and 971553409828 read as the same number.
+	shopDialCode: {
+		"1635200759": "971",
+		"1328205216": "966",
+		"1328205226": "965",
+	} as { [shopId: string]: string | undefined },
+	databaseNames: ["CRM", "comp_ai_crm", "comp_ai_crm_test", "comp_ai_crm_demo"],
+} as const;
+
+export const RESOURCES = [
+	"employees",
+	"customers",
+	"products",
+	"orders",
+	"returns",
+] as const;
+export type Resource = (typeof RESOURCES)[number];
+
+export const STATUS_NAMES: { [status: number]: string } = {
+	0: "Mới",
+	17: "Chờ xác nhận",
+	11: "Chờ hàng",
+	12: "Chờ in",
+	13: "Đã in",
+	20: "Đã đặt hàng",
+	1: "Đã xác nhận",
+	8: "Đang đóng hàng",
+	9: "Chờ chuyển hàng",
+	2: "Đã gửi hàng",
+	3: "Đã nhận",
+	16: "Đã thu tiền",
+	4: "Đang hoàn",
+	15: "Hoàn một phần",
+	5: "Đã hoàn",
+	6: "Đã hủy",
+	7: "Đã xóa",
+};
+
+export function assertCrmDatabase(url: string): void {
+	const parsed = new URL(url);
+	if (!["postgresql:", "postgres:"].includes(parsed.protocol))
+		throw new Error("Use a PostgreSQL URI without a Python driver suffix.");
+	const name = parsed.pathname.slice(1);
+	if (!PANCAKE.databaseNames.some((allowed) => allowed === name)) {
+		throw new Error(
+			"Pancake requires a dedicated CRM or comp_ai_crm database. Other databases are refused.",
+		);
+	}
+}

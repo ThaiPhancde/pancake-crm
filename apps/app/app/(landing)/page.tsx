@@ -1,30 +1,28 @@
-import type { Metadata } from "next";
-import { AgentSection } from "@/components/landing/agent-section";
-import { LandingAnalytics } from "@/components/landing/analytics";
-import { CapabilitiesSection } from "@/components/landing/capabilities-section";
-import { ClosingCta } from "@/components/landing/closing-cta";
-import { Hero } from "@/components/landing/hero";
-import { LandingFooter } from "@/components/landing/landing-footer";
-import { LandingNav } from "@/components/landing/landing-nav";
-import { ProductShot } from "@/components/landing/product-shot/product-shot";
+import { db } from "@crm/db";
+import { WORKSPACE_ID } from "@crm/db/workspace";
+import { redirect } from "next/navigation";
+import { Suspense } from "react";
+import { getSession } from "@/lib/session";
+import { workspaceUrl } from "@/lib/workspace-url";
 
-export const metadata: Metadata = {
-	title: "The CRM for agents",
-	description:
-		"The first agentic CRM experience — durable research agents that read your inbox, keep every record current and book their own follow-ups.",
-};
+// Skip the marketing page. Signed-in visitors go straight to their workspace;
+// sending them to /sign-in would loop, as that page sends signed-in users back here.
+async function Entry(): Promise<null> {
+	if (!(await getSession())) redirect("/sign-in");
+	const workspace = await db.organization.findUnique({
+		where: { id: WORKSPACE_ID },
+		select: { slug: true },
+	});
+	redirect(
+		workspace ? workspaceUrl(workspace.slug, "/pancake") : "/onboarding",
+	);
+	return null;
+}
 
 export default function Home() {
 	return (
-		<div className="dark flex min-h-svh w-full flex-col items-center overflow-clip bg-background font-sans text-foreground">
-			<LandingNav />
-			<Hero />
-			<ProductShot />
-			<AgentSection />
-			<CapabilitiesSection />
-			<ClosingCta />
-			<LandingFooter />
-			<LandingAnalytics />
-		</div>
+		<Suspense>
+			<Entry />
+		</Suspense>
 	);
 }

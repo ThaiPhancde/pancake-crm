@@ -1,0 +1,34 @@
+{
+	"name": "@crm/pancake",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./contracts": "./src/contracts.ts",
+		"./config": "./src/config.ts",
+		"./client": "./src/client.ts",
+		"./store": "./src/store.ts",
+		"./sync": "./src/sync.ts",
+		"./queries": "./src/queries.ts",
+		"./access": "./src/access.ts",
+		"./webhook": "./src/webhook.ts"
+	},
+	"scripts": {
+		"check-types": "tsc --noEmit",
+		"test": "bun test test/client.spec.ts test/policy.spec.ts",
+		"test:integration": "bun test test/integration.spec.ts",
+		"lint": "biome check ."
+	},
+	"dependencies": {
+		"@crm/db": "workspace:*",
+		"@crm/env": "workspace:*",
+		"pg": "^8.22.0",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@crm/typescript-config": "workspace:*",
+		"@types/bun": "^1.3.14",
+		"@types/pg": "^8.15.6",
+		"typescript": "5.9.2"
+	}
+}

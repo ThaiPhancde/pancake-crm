@@ -1,0 +1,58 @@
+import "@crm/env/load";
+import { db } from "@crm/db";
+import { PancakeApiError } from "@crm/pancake/client";
+import { assertCrmDatabase, PANCAKE } from "@crm/pancake/config";
+import { safeErrorCode, syncShop } from "@crm/pancake/sync";
+
+let stopping = false;
+const retryAt = new Map<string, number>();
+process.on("SIGINT", () => {
+	stopping = true;
+});
+process.on("SIGTERM", () => {
+	stopping = true;
+});
+
+async function main() {
+	if (process.env.PANCAKE_LIVE_SYNC_ENABLED !== "1") {
+		process.stdout.write(
+			"Pancake worker is disabled. Real-data synchronization remains locked.\n",
+		);
+		return;
+	}
+	assertCrmDatabase(process.env.DATABASE_URL ?? "");
+	do {
+		const shops = await db.pancakeShop.findMany({
+			where: {
+				enabled: true,
+				liveApprovedAt: { not: null },
+				fixtureVerifiedAt: { not: null },
+			},
+			orderBy: { id: "asc" },
+		});
+		for (const shop of shops) {
+			if (stopping) break;
+			if ((retryAt.get(shop.id) ?? 0) > Date.now()) continue;
+			try {
+				const result = await syncShop(db, shop);
+				process.stdout.write(
+					`${JSON.stringify({ shopId: shop.id, ...result })}\n`,
+				);
+			} catch (error) {
+				if (error instanceof PancakeApiError && error.retryAfterMs > 0)
+					retryAt.set(shop.id, Date.now() + error.retryAfterMs);
+				process.stderr.write(
+					`${JSON.stringify({ shopId: shop.id, errorCode: safeErrorCode(error) })}\n`,
+				);
+			}
+		}
+		if (process.argv.includes("--once")) break;
+		await Bun.sleep(PANCAKE.pollMs);
+	} while (!stopping);
+}
+
+try {
+	await main();
+} finally {
+	await db.$disconnect();
+}

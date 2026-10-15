@@ -1,0 +1,20 @@
+{
+	"name": "pancake-sync",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"start": "bun src/main.ts",
+		"check-types": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@crm/db": "workspace:*",
+		"@crm/env": "workspace:*",
+		"@crm/pancake": "workspace:*"
+	},
+	"devDependencies": {
+		"@crm/typescript-config": "workspace:*",
+		"@types/bun": "^1.3.14",
+		"typescript": "5.9.2"
+	}
+}

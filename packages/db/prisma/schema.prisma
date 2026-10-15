@@ -48,10 +48,227 @@ model User {
 
   ssoproviders SsoProvider[]
 
-  apiKeys Apikey[]
+  apiKeys            Apikey[]
+  pancakeMemberships PancakeShopMember[]
 
   @@unique([email])
   @@map("user")
+}
+
+enum PancakeRole {
+  MANAGER
+  TELESALE
+  VIEWER
+}
+
+model PancakeShop {
+  id                String              @id
+  name              String
+  apiKeyEnv         String
+  webhookTokenEnv   String?
+  enabled           Boolean             @default(false)
+  liveApprovedAt    DateTime?
+  fixtureVerifiedAt DateTime?
+  lastSyncAt        DateTime?
+  lastWebhookAt     DateTime?
+  lastError         String?
+  createdAt         DateTime            @default(now())
+  members           PancakeShopMember[]
+  customers         PancakeCustomer[]
+  products          PancakeProduct[]
+  employees         PancakeEmployee[]
+  orders            PancakeOrder[]
+  returns           PancakeReturn[]
+  cursors           PancakeSyncCursor[]
+  webhooks          PancakeWebhookJob[]
+  runs              PancakeSyncRun[]
+
+  @@map("pancakeShop")
+}
+
+model PancakeShopMember {
+  shopId     String
+  userId     String
+  role       PancakeRole
+  employeeId String?
+  shop       PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([shopId, userId])
+  @@index([userId])
+  @@map("pancakeShopMember")
+}
+
+model PancakeCustomer {
+  shopId             String
+  customerId         String
+  name               String
+  phone              String?
+  email              String?
+  assignedEmployeeId String?
+  sourceUpdatedAt    DateTime?
+  fetchedAt          DateTime
+  raw                Json
+  shop               PancakeShop    @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  orders             PancakeOrder[]
+
+  @@id([shopId, customerId])
+  @@index([shopId, name])
+  @@index([shopId, phone])
+  @@map("pancakeCustomer")
+}
+
+model PancakeProduct {
+  shopId          String
+  variationId     String
+  productId       String
+  name            String
+  sku             String?
+  price           Decimal?    @db.Decimal(24, 4)
+  stock           Decimal?    @db.Decimal(24, 4)
+  hidden          Boolean     @default(false)
+  sourceUpdatedAt DateTime?
+  fetchedAt       DateTime
+  raw             Json
+  shop            PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@id([shopId, variationId])
+  @@index([shopId, productId])
+  @@map("pancakeProduct")
+}
+
+model PancakeEmployee {
+  shopId          String
+  employeeId      String
+  name            String
+  email           String?
+  sourceUpdatedAt DateTime?
+  fetchedAt       DateTime
+  raw             Json
+  shop            PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@id([shopId, employeeId])
+  @@map("pancakeEmployee")
+}
+
+model PancakeOrder {
+  shopId          String
+  orderId         String
+  customerId      String?
+  customerName    String
+  customerPhone   String?
+  sellerId        String?
+  sellerName      String?
+  careId          String?
+  creatorId       String?
+  lastEditorId    String?
+  status          Int
+  subStatus       Int?
+  currency        String
+  totalPrice      Decimal               @db.Decimal(24, 4)
+  trackingCode    String?
+  trackingUrl     String?
+  deliveryStatus  String?
+  returnReason    String?
+  sourceCreatedAt DateTime
+  sourceUpdatedAt DateTime
+  fetchedAt       DateTime
+  raw             Json
+  shop            PancakeShop           @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  customer        PancakeCustomer?      @relation(fields: [shopId, customerId], references: [shopId, customerId], onDelete: Restrict)
+  history         PancakeOrderHistory[]
+
+  @@id([shopId, orderId])
+  @@index([shopId, sourceCreatedAt])
+  @@index([shopId, status, sellerId])
+  @@index([shopId, customerId])
+  @@map("pancakeOrder")
+}
+
+model PancakeOrderHistory {
+  id             String       @id @default(cuid())
+  shopId         String
+  orderId        String
+  eventKey       String
+  oldStatus      Int?
+  status         Int
+  subStatus      Int?
+  deliveryStatus String?
+  trackingCode   String?
+  actorId        String?
+  occurredAt     DateTime
+  recordedAt     DateTime     @default(now())
+  source         String
+  order          PancakeOrder @relation(fields: [shopId, orderId], references: [shopId, orderId], onDelete: Restrict)
+
+  @@unique([shopId, orderId, eventKey])
+  @@index([shopId, orderId, occurredAt])
+  @@map("pancakeOrderHistory")
+}
+
+model PancakeReturn {
+  shopId          String
+  returnId        String
+  orderId         String?
+  status          Int
+  returnedFee     Decimal?    @db.Decimal(24, 4)
+  sourceUpdatedAt DateTime
+  fetchedAt       DateTime
+  raw             Json
+  shop            PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@id([shopId, returnId])
+  @@index([shopId, orderId])
+  @@map("pancakeReturn")
+}
+
+model PancakeSyncCursor {
+  shopId         String
+  resource       String
+  phase          String      @default("history")
+  nextPage       Int         @default(1)
+  windowStart    DateTime?
+  windowEnd      DateTime?
+  watermark      DateTime?
+  lastFullScanAt DateTime?
+  updatedAt      DateTime    @updatedAt
+  shop           PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@id([shopId, resource])
+  @@map("pancakeSyncCursor")
+}
+
+model PancakeWebhookJob {
+  id          String      @id @default(cuid())
+  shopId      String
+  resource    String
+  dedupeKey   String
+  status      String      @default("pending")
+  attempts    Int         @default(0)
+  dueAt       DateTime    @default(now())
+  lastError   String?
+  createdAt   DateTime    @default(now())
+  completedAt DateTime?
+  shop        PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@unique([shopId, resource, dedupeKey])
+  @@index([status, dueAt])
+  @@map("pancakeWebhookJob")
+}
+
+model PancakeSyncRun {
+  id         String      @id @default(cuid())
+  shopId     String
+  startedAt  DateTime    @default(now())
+  finishedAt DateTime?
+  status     String      @default("running")
+  pages      Int         @default(0)
+  records    Int         @default(0)
+  errorCode  String?
+  shop       PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, startedAt])
+  @@map("pancakeSyncRun")
 }
 
 model SlackMemberMatch {
