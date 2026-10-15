@@ -1,11 +1,10 @@
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
 import {
-	type PancakeData,
-	PancakeScreen,
 	parseFilters,
 	type SearchValues,
-} from "@/components/pancake/screen";
+} from "@/components/pancake/filter-state";
+import { type PancakeData, PancakeScreen } from "@/components/pancake/screen";
 import { requireSession } from "@/lib/session";
 import { getServerTrpcClient } from "@/lib/trpc/server";
 
@@ -29,23 +28,81 @@ async function PancakeContent({
 }) {
 	await requireSession();
 	const [{ slug }, values] = await Promise.all([params, searchParams]);
-	const { input, tab, customerId, orderId } = parseFilters(values);
+	const { input, tab, customerId, orderId, taskView } = parseFilters(values);
 	const api = getServerTrpcClient().pancake;
-	const data: PancakeData = { shops: await api.status.query() };
+	const data: PancakeData = { shops: [] };
+	const pending: Promise<void>[] = [
+		api.status.query().then((shops) => {
+			data.shops = shops;
+		}),
+	];
+	if (tab === "overview")
+		pending.push(
+			api.overview.query(input).then((value) => {
+				data.overview = value;
+			}),
+		);
+	if (["overview", "orders", "report"].includes(tab))
+		pending.push(
+			api.sellers.query({ shopId: input.shopId }).then((value) => {
+				data.sellers = value;
+			}),
+		);
+	if (tab === "tasks")
+		pending.push(
+			api.tasks.query({ ...input, taskView }).then((value) => {
+				data.tasks = value;
+			}),
+		);
 	if (tab === "orders") {
 		if (customerId && input.shopId)
-			data.purchases = await api.purchases.query({
-				shopId: input.shopId,
-				customerId,
-				filters: input,
-			});
-		else data.orders = await api.orders.query(input);
+			pending.push(
+				api.purchases
+					.query({ shopId: input.shopId, customerId, filters: input })
+					.then((value) => {
+						data.purchases = value;
+					}),
+			);
+		else
+			pending.push(
+				api.orders.query(input).then((value) => {
+					data.orders = value;
+				}),
+			);
 		if (orderId && input.shopId)
-			data.detail = await api.detail.query({ shopId: input.shopId, orderId });
+			pending.push(
+				api.detail
+					.query({ shopId: input.shopId, orderId })
+					.then(async (value) => {
+						data.detail = value;
+						if (value.canCreateTask)
+							data.assignees = await api.taskAssignees.query({
+								shopId: value.shopId,
+								orderId: value.orderId,
+							});
+					}),
+			);
 	}
-	if (tab === "customers") data.customers = await api.customers.query(input);
-	if (tab === "report") data.report = await api.report.query(input);
-	if (tab === "products") data.products = await api.products.query(input);
+	if (tab === "customers")
+		pending.push(
+			api.customers.query(input).then((value) => {
+				data.customers = value;
+			}),
+		);
+	if (tab === "report")
+		pending.push(
+			api.report.query(input).then((value) => {
+				data.report = value;
+			}),
+		);
+	if (tab === "products")
+		pending.push(
+			api.products.query(input).then((value) => {
+				data.products = value;
+			}),
+		);
+	await Promise.all(pending);
+
 	return (
 		<PancakeScreen base={`/${slug}/pancake`} values={values} data={data} />
 	);

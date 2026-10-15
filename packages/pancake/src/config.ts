@@ -15,6 +15,7 @@ export const PANCAKE = {
 	webhookMaxAttempts: 8,
 	webhookBatch: 25,
 	maxListSize: 100,
+	overviewRows: 8,
 	timezone: "Asia/Ho_Chi_Minh",
 	// Fallback when an order carries no order_currency.
 	shopCurrency: new Map([
@@ -29,6 +30,14 @@ export const PANCAKE = {
 		["1328205226", "965"],
 	]),
 	databaseNames: ["CRM", "comp_ai_crm", "comp_ai_crm_test", "comp_ai_crm_demo"],
+} as const;
+
+export const ORDER_VIEWS = {
+	all: { name: "Tất cả", statuses: [] as number[] },
+	pending: { name: "Chờ xử lý", statuses: [0, 17, 1, 8, 9, 11, 12, 13, 20] },
+	shipping: { name: "Đang giao", statuses: [2] },
+	returns: { name: "Hoàn hàng", statuses: [4, 5, 15] },
+	unassigned: { name: "Chưa phân công", statuses: [] as number[] },
 } as const;
 
 export const RESOURCES = [

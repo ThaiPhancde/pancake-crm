@@ -122,7 +122,7 @@ Khách hàng không có timestamp nguồn dùng thời điểm bắt đầu đ�
 
 Một resource lỗi không dừng các resource khác. HTTP 429 dừng lượt shop và giữ thời gian retry.
 
-Báo cáo tổng hợp `total_price` riêng theo tiền tệ cho trạng thái đã nhận và đã thu tiền.
+Báo cáo giữ quy ước hiện tại của dự án: giá trị đơn lấy từ `shipping_fee`, chia 100 cho ngoại tệ. Người dùng xác nhận giữ quy ước ngày 15/10/2026. Mỗi loại tiền tệ được tổng hợp riêng cho trạng thái đã nhận và đã thu tiền.
 
 Báo cáo không phải sổ kế toán. Báo cáo chưa đối soát phí, thuế hoặc tiền hoàn một phần.
 

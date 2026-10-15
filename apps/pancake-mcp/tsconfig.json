@@ -1,0 +1,10 @@
+{
+	"extends": "@crm/typescript-config/base.json",
+	"compilerOptions": {
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"noEmit": true,
+		"types": ["bun"]
+	},
+	"include": ["src/**/*.ts", "test/**/*.ts"]
+}

@@ -194,6 +194,10 @@ export const shopConfig = z.object({
 export const shopsConfig = z.array(shopConfig);
 export const listInput = z
 	.object({
+		view: z
+			.enum(["all", "pending", "shipping", "returns", "unassigned"])
+			.default("all"),
+		sort: z.enum(["newest", "updated", "oldest"]).default("newest"),
 		shopId: z.string().min(1).optional(),
 		q: z.string().max(120).default(""),
 		status: z.number().int().optional(),

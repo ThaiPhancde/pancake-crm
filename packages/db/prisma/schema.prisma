@@ -50,6 +50,8 @@ model User {
 
   apiKeys            Apikey[]
   pancakeMemberships PancakeShopMember[]
+  assignedPancakeTasks PancakeTask[] @relation("PancakeTaskAssignee")
+  createdPancakeTasks PancakeTask[] @relation("PancakeTaskCreator")
 
   @@unique([email])
   @@map("user")
@@ -177,12 +179,42 @@ model PancakeOrder {
   shop            PancakeShop           @relation(fields: [shopId], references: [id], onDelete: Restrict)
   customer        PancakeCustomer?      @relation(fields: [shopId, customerId], references: [shopId, customerId], onDelete: Restrict)
   history         PancakeOrderHistory[]
+  tasks           PancakeTask[]
 
   @@id([shopId, orderId])
   @@index([shopId, sourceCreatedAt])
   @@index([shopId, status, sellerId])
   @@index([shopId, customerId])
+  @@index([shopId, sourceUpdatedAt])
+  @@index([shopId, sellerId, sourceCreatedAt])
   @@map("pancakeOrder")
+}
+
+enum PancakeTaskStatus {
+  OPEN
+  DONE
+}
+
+model PancakeTask {
+  id           String @id @default(cuid())
+  shopId       String
+  orderId      String
+  title        String
+  note         String @default("")
+  dueAt        DateTime
+  assigneeId   String
+  createdById  String
+  status       PancakeTaskStatus @default(OPEN)
+  completedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  order        PancakeOrder @relation(fields: [shopId, orderId], references: [shopId, orderId], onDelete: Restrict)
+  assignee     User @relation("PancakeTaskAssignee", fields: [assigneeId], references: [id], onDelete: Restrict)
+  createdBy    User @relation("PancakeTaskCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([shopId, status, dueAt])
+  @@index([assigneeId, status, dueAt])
+  @@map("pancakeTask")
 }
 
 model PancakeOrderHistory {

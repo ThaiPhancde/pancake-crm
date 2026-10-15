@@ -1,4 +1,9 @@
 import { listInput, roleInput } from "@crm/pancake/contracts";
+import {
+	createTaskInput,
+	taskListInput,
+	updateTaskInput,
+} from "@crm/pancake/tasks";
 import { Inject } from "@nestjs/common";
 import {
 	Ctx,
@@ -27,6 +32,45 @@ export class PancakeRouter {
 	constructor(
 		@Inject(PancakeService) private readonly pancake: PancakeService,
 	) {}
+	@Query({ input: listInput })
+	overview(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof listInput>,
+	) {
+		return this.pancake.overview(ctx.user.id, input);
+	}
+	@Query({ input: z.object({ shopId: z.string().min(1).optional() }) })
+	sellers(@Ctx() ctx: AuthedTrpcContext, @Input() input: { shopId?: string }) {
+		return this.pancake.sellers(ctx.user.id, input.shopId);
+	}
+	@Query({ input: taskListInput })
+	tasks(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof taskListInput>,
+	) {
+		return this.pancake.tasks(ctx.user.id, input);
+	}
+	@Query({ input: orderInput })
+	taskAssignees(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof orderInput>,
+	) {
+		return this.pancake.taskAssignees(ctx.user.id, input.shopId, input.orderId);
+	}
+	@Mutation({ input: createTaskInput })
+	createTask(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof createTaskInput>,
+	) {
+		return this.pancake.createTask(ctx.user.id, input);
+	}
+	@Mutation({ input: updateTaskInput })
+	updateTask(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof updateTaskInput>,
+	) {
+		return this.pancake.updateTask(ctx.user.id, input);
+	}
 	@Query({ input: listInput })
 	orders(
 		@Ctx() ctx: AuthedTrpcContext,

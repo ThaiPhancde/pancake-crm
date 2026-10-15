@@ -1,0 +1,24 @@
+{
+	"name": "@crm/pancake-mcp",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"start": "bun src/main.ts",
+		"check-types": "tsc --noEmit",
+		"lint": "biome check ."
+	},
+	"dependencies": {
+		"@crm/auth": "workspace:*",
+		"@crm/db": "workspace:*",
+		"@crm/env": "workspace:*",
+		"@crm/pancake": "workspace:*",
+		"@modelcontextprotocol/sdk": "^1.32.1",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@crm/typescript-config": "workspace:*",
+		"@types/bun": "^1.3.14",
+		"typescript": "5.9.2"
+	}
+}

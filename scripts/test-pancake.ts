@@ -19,6 +19,9 @@ const result = Bun.spawnSync(
 		"packages/pancake/test/client.spec.ts",
 		"packages/pancake/test/policy.spec.ts",
 		"packages/pancake/test/integration.spec.ts",
+		"packages/pancake/test/workflow.spec.ts",
+		"apps/app/components/pancake/filter-state.spec.ts",
+		"apps/pancake-mcp/test/server.spec.ts",
 	],
 	{
 		cwd: root,

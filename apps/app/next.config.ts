@@ -25,7 +25,13 @@ const nextConfig: NextConfig = {
 		NEXT_PUBLIC_API_URL: apiUrl,
 	},
 
-	transpilePackages: ["@crm/auth", "@crm/db", "@crm/pancake", "@crm/telemetry", "@crm/ui"],
+	transpilePackages: [
+		"@crm/auth",
+		"@crm/db",
+		"@crm/pancake",
+		"@crm/telemetry",
+		"@crm/ui",
+	],
 
 	serverExternalPackages: ["@prisma/client", "@prisma/adapter-pg", "pg"],
 

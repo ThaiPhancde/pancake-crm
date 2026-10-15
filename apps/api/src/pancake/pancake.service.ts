@@ -9,11 +9,27 @@ import {
 	listOrders,
 	listProducts,
 	membershipOptions,
+	operationsOverview,
 	orderDetail,
 	pauseShop,
+	sellerOptions,
 	setMembership,
 } from "@crm/pancake/queries";
-import { ForbiddenException, Injectable } from "@nestjs/common";
+import {
+	createTask,
+	createTaskInput,
+	listTasks,
+	PancakeTaskConflict,
+	taskAssignees,
+	taskListInput,
+	updateTask,
+	updateTaskInput,
+} from "@crm/pancake/tasks";
+import {
+	ConflictException,
+	ForbiddenException,
+	Injectable,
+} from "@nestjs/common";
 import type { z } from "zod";
 import { InjectDatabase } from "../database/database.constants";
 
@@ -48,6 +64,26 @@ export class PancakeService {
 	status(userId: string) {
 		return this.authorize(() => connectionStatus(this.db, userId));
 	}
+	overview(userId: string, input: z.infer<typeof listInput>) {
+		return this.authorize(() => operationsOverview(this.db, userId, input));
+	}
+	sellers(userId: string, shopId?: string) {
+		return this.authorize(() => sellerOptions(this.db, userId, shopId));
+	}
+	tasks(userId: string, input: z.infer<typeof taskListInput>) {
+		return this.authorize(() => listTasks(this.db, userId, input));
+	}
+	taskAssignees(userId: string, shopId: string, orderId: string) {
+		return this.authorize(() =>
+			taskAssignees(this.db, userId, shopId, orderId),
+		);
+	}
+	createTask(userId: string, input: z.infer<typeof createTaskInput>) {
+		return this.authorize(() => createTask(this.db, userId, input));
+	}
+	updateTask(userId: string, input: z.infer<typeof updateTaskInput>) {
+		return this.authorize(() => updateTask(this.db, userId, input));
+	}
 	options(userId: string, shopId: string) {
 		return this.authorize(() => membershipOptions(this.db, userId, shopId));
 	}
@@ -61,6 +97,10 @@ export class PancakeService {
 		try {
 			return await action();
 		} catch (error) {
+			if (error instanceof PancakeTaskConflict)
+				throw new ConflictException(
+					"Công việc đã thay đổi. Hãy tải lại trang.",
+				);
 			if (error instanceof PancakeAccessError)
 				throw new ForbiddenException(error.message);
 			throw error;

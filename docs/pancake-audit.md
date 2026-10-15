@@ -20,7 +20,7 @@ Commit nguồn: `6d4793dd6d7aeea91aa6a034e00b17d7408a2d08`. License MIT được
 | Nhiều shop và quyền | Có MANAGER, TELESALE, VIEWER; kiểm tra quyền ở server |
 | Windows và PostgreSQL | Production dùng database CRM trên PostgreSQL 18 hiện có; không Docker |
 | Độc lập AI | Worker không gọi model và không tạo AgentTask |
-| Dữ liệu mẫu | 30 test đạt; 7 màn hình trình duyệt đạt; 5 kiểm tra HTTP mẫu đạt |
+| Dữ liệu mẫu | 44 test đạt; 13 kiểm tra trình duyệt đạt; 4 kiểm tra HTTP production đạt |
 
 Production artifacts của API và Next.js build thành công. Agent type-check thành công.
 
@@ -28,11 +28,11 @@ Google OAuth trả HTTP 200 khi khởi tạo đăng nhập. Sau khi thêm callba
 
 Scheduled task `CompAI-CRM-Pancake` đã được đăng ký để khởi động production khi người dùng Windows hiện tại đăng nhập. Bản mẫu không tự khởi động cùng task này.
 
-Database CRM trống trước migration. Đã áp dụng 57 migration. Prisma xác nhận không có schema drift.
+Database CRM trống trước migration. Đã áp dụng 58 migration, gồm migration công việc CRM ngày 15/10/2026. Prisma xác nhận không có schema drift.
 
 Database mẫu: `comp_ai_crm_test` và `comp_ai_crm_demo` trên PostgreSQL riêng, cổng 55432.
 
-Database production không có dữ liệu mẫu hoặc dữ liệu Pancake thật.
+Database production hiện có 300 đơn thật từ UAE, Saudi và Kuwait. Dữ liệu mẫu vẫn nằm trong database riêng.
 
 API và giao diện chỉ bind loopback. PostgreSQL chính 5432, cổng 3000 và cổng 8000 giữ tiến trình ban đầu.
 
@@ -84,17 +84,15 @@ Các dependency còn cảnh báo được ghi đầy đủ trong [dependency-aud
 
 ## Cần cấu hình hoặc kiểm chứng tiếp
 
-1. NOT DONE — Chưa có shop ID và API key Pancake. Đồng bộ dữ liệu thật đang khóa.
-   Fix: cấu hình `.env`, chạy kiểm thử và cấu hình shop theo [hướng dẫn Windows](./pancake-windows.md).
+1. NOT DONE — Lịch sử hiện mới có 100 đơn mỗi shop, tổng 300 đơn. Đồng bộ nền đang tắt.
+   Fix: tiếp tục nhập lịch sử theo checkpoint khi bật worker; giữ quy trình kiểm thử trong [hướng dẫn Windows](./pancake-windows.md).
 2. NOT DONE — Chưa có URL HTTPS công khai và webhook token cho từng shop.
    Fix: cấu hình webhook bằng giao diện Pancake; dùng polling trước khi có URL webhook.
-3. NOT DONE — Chưa hoàn tất lần đăng nhập Google và cấp quyền tương tác đầu tiên.
-   Fix: mở CRM, đăng nhập bằng email được cấp quyền và hoàn tất onboarding upstream. Callback đã cấu hình và kiểm tra không còn lỗi URI.
-4. NOT DONE — AI Agent chưa chạy suy luận hoặc sandbox trên Windows.
+3. NOT DONE — AI Agent chưa chạy suy luận hoặc sandbox trên Windows.
    Fix: cấu hình gateway, bridge và sandbox riêng; giữ worker đồng bộ độc lập.
-5. RISK — Dependency audit còn 10 advisory high. Bản vá chưa bao phủ toàn bộ dependency upstream.
+4. RISK — Dependency audit còn 10 advisory high. Bản vá chưa bao phủ toàn bộ dependency upstream.
    Fix: tiếp tục xử lý các version tương thích trước khi phục vụ CRM trên Internet.
-6. NOT DONE — Báo cáo chưa đối soát kế toán, phí, thuế hoặc tiền hoàn một phần.
+5. NOT DONE — Báo cáo chưa đối soát kế toán, phí, thuế hoặc tiền hoàn một phần.
    Fix: bổ sung quy tắc tài chính và dữ liệu đối soát khi cần báo cáo doanh thu ròng.
 
 ## Bằng chứng
@@ -110,3 +108,11 @@ Test so sánh AgentTask trước và sau đồng bộ xác nhận không tạo t
 Bằng chứng máy đọc được nằm trong `.scratch`. Secrets và session cookie mẫu không được đưa vào Git.
 
 Ảnh báo cáo mẫu: [pancake-demo-report.png](./pancake-demo-report.png).
+
+## Cập nhật 15/10/2026
+
+Đã thêm tổng quan, công việc theo đơn và MCP chỉ đọc. Xem [báo cáo rebuild](./pancake-rebuild.md).
+
+Audit dependency ngày 15/10/2026 vẫn có 0 critical, 10 high, 13 moderate và 8 low.
+
+Người dùng xác nhận giữ quy ước giá trị đơn từ `shipping_fee`, chia 100 cho ngoại tệ. Bản rebuild không đổi số tiền đang lưu.

@@ -14,5 +14,5 @@ $logFolder=Join-Path $crmRoot '.logs'
 New-Item -ItemType Directory -Force -Path $logFolder | Out-Null
 $nextBinary=Join-Path $crmRoot 'apps\app\node_modules\next\dist\bin\next'
 $previewProcess=Start-Process -FilePath $nodeBinary -ArgumentList @($nextBinary,'dev','--hostname','127.0.0.1','--port','3120') -WorkingDirectory (Join-Path $crmRoot 'apps\app') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logFolder 'demo-preview.log') -RedirectStandardError (Join-Path $logFolder 'demo-preview-error.log')
-@{name='demo-preview';id=$previewProcess.Id} | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $logFolder 'demo-preview.json')
+@{name='demo-preview';id=$previewProcess.Id;startedAt=$previewProcess.StartTime.ToUniversalTime().ToString('o')} | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $logFolder 'demo-preview.json')
 Write-Output 'Safe sample preview: http://localhost:3120/pancake-demo'

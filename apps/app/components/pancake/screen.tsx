@@ -1,6 +1,5 @@
 import "server-only";
-import { PANCAKE, STATUS_NAMES } from "@crm/pancake/config";
-import { listInput } from "@crm/pancake/contracts";
+import { STATUS_NAMES } from "@crm/pancake/config";
 import type {
 	connectionStatus,
 	customerPurchases,
@@ -8,8 +7,11 @@ import type {
 	listCustomers,
 	listOrders,
 	listProducts,
+	operationsOverview,
 	orderDetail,
+	sellerOptions,
 } from "@crm/pancake/queries";
+import type { listTasks } from "@crm/pancake/tasks";
 import { Alert, AlertDescription, AlertTitle } from "@crm/ui/components/alert";
 import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
@@ -30,11 +32,22 @@ import {
 	TableRow,
 } from "@crm/ui/components/table";
 import Link from "next/link";
-import { z } from "zod";
+import {
+	parseFilters,
+	type SearchValues,
+	pancakeUrl as url,
+} from "./filter-state";
 import { PancakeFilters } from "./filters";
+import { formatAmount as amount, formatDate as date } from "./format";
+import { OperationsPanel } from "./operations-panel";
+import { TaskCreate } from "./task-actions";
+import { TaskPanel } from "./task-panel";
 
-export type SearchValues = { [key: string]: string | string[] | undefined };
 export type PancakeData = {
+	overview?: Awaited<ReturnType<typeof operationsOverview>>;
+	tasks?: Awaited<ReturnType<typeof listTasks>>;
+	assignees?: { id: string; name: string }[];
+	sellers?: Awaited<ReturnType<typeof sellerOptions>>;
 	shops: Awaited<ReturnType<typeof connectionStatus>>;
 	orders?: Awaited<ReturnType<typeof listOrders>>;
 	customers?: Awaited<ReturnType<typeof listCustomers>>;
@@ -43,82 +56,6 @@ export type PancakeData = {
 	report?: Awaited<ReturnType<typeof dashboardReport>>;
 	products?: Awaited<ReturnType<typeof listProducts>>;
 };
-
-export function parseFilters(values: SearchValues) {
-	const text = (key: string) => z.string().catch("").parse(values[key]);
-	const from = text("from");
-	const to = text("to");
-	if (from) z.iso.date().parse(from);
-	if (to) z.iso.date().parse(to);
-	const end = to ? new Date(`${to}T00:00:00+07:00`) : undefined;
-	if (end) end.setTime(end.getTime() + 86_400_000);
-	const input = listInput.parse({
-		shopId:
-			text("shopId") && text("shopId") !== "all" ? text("shopId") : undefined,
-		q: text("q"),
-		status:
-			text("status") && text("status") !== "all"
-				? Number(text("status"))
-				: undefined,
-		sellerId: text("sellerId") || undefined,
-		from: from ? new Date(`${from}T00:00:00+07:00`).toISOString() : undefined,
-		to: end?.toISOString(),
-		page: text("page") ? Number(text("page")) : 1,
-		pageSize: 25,
-	});
-	const tab = [
-		"orders",
-		"customers",
-		"products",
-		"report",
-		"connections",
-	].includes(text("tab"))
-		? text("tab")
-		: "orders";
-	return {
-		input,
-		tab,
-		from,
-		to,
-		customerId: text("customerId"),
-		orderId: text("orderId"),
-	};
-}
-
-function amount(value: string, currency: string): string {
-	return new Intl.NumberFormat("vi-VN", {
-		style: "currency",
-		currency,
-		maximumFractionDigits: currency === "VND" ? 0 : 2,
-	}).format(Number(value));
-}
-
-function date(value: string | null): string {
-	return value
-		? new Intl.DateTimeFormat("vi-VN", {
-				dateStyle: "short",
-				timeStyle: "short",
-				timeZone: PANCAKE.timezone,
-			}).format(new Date(value))
-		: "Chưa có";
-}
-
-function url(
-	base: string,
-	values: SearchValues,
-	change: { [key: string]: string },
-): string {
-	const params = new URLSearchParams();
-	for (const [key, value] of Object.entries(values)) {
-		const text = z.string().min(1).safeParse(value);
-		if (text.success) params.set(key, text.data);
-	}
-	for (const [key, value] of Object.entries(change)) {
-		if (value) params.set(key, value);
-		else params.delete(key);
-	}
-	return `${base}?${params}`;
-}
 
 export function PancakeScreen({
 	base,
@@ -133,14 +70,13 @@ export function PancakeScreen({
 }) {
 	const filter = parseFilters(values);
 	const orders = data.purchases ?? data.orders;
+	const shopNames = new Map(data.shops.map((shop) => [shop.id, shop.name]));
 	return (
 		<main className="flex min-h-0 min-w-0 flex-1 flex-col [&>*]:shrink-0 gap-(--spacing-page-gap) overflow-auto px-(--spacing-page-inline) py-(--spacing-page-top)">
 			<div className="flex flex-col gap-2">
-				<h1 className="text-2xl font-medium">
-					Khách hàng và đơn hàng Pancake POS
-				</h1>
+				<h1 className="text-2xl font-medium">Pancake CRM</h1>
 				<p className="text-muted-foreground">
-					Quản lý bán hàng theo shop, nhân viên và lịch sử giao hàng.
+					Theo dõi đơn hàng, chăm sóc khách và xử lý công việc theo từng shop.
 				</p>
 			</div>
 			{demo && (
@@ -151,9 +87,22 @@ export function PancakeScreen({
 					</AlertDescription>
 				</Alert>
 			)}
+			{!demo &&
+				data.shops.length > 0 &&
+				data.shops.some((shop) => !shop.historyComplete) && (
+					<Alert>
+						<AlertTitle>Dữ liệu lịch sử chưa đầy đủ</AlertTitle>
+						<AlertDescription>
+							Danh sách và báo cáo phản ánh dữ liệu đã nhập. Xem Shop và đồng bộ
+							để kiểm tra tiến độ.
+						</AlertDescription>
+					</Alert>
+				)}
 			<nav aria-label="Pancake POS" className="flex flex-wrap gap-2">
 				{[
+					{ id: "overview", name: "Tổng quan" },
 					{ id: "orders", name: "Đơn hàng" },
+					{ id: "tasks", name: "Công việc" },
 					{ id: "customers", name: "Khách hàng" },
 					{ id: "products", name: "Sản phẩm" },
 					{ id: "report", name: "Doanh thu / Telesale" },
@@ -165,6 +114,7 @@ export function PancakeScreen({
 						variant={filter.tab === tab.id ? "default" : "outline"}
 					>
 						<Link
+							aria-current={filter.tab === tab.id ? "page" : undefined}
 							href={url(base, values, {
 								tab: tab.id,
 								page: "",
@@ -178,6 +128,11 @@ export function PancakeScreen({
 				))}
 			</nav>
 			<PancakeFilters
+				key={`${filter.tab}:${JSON.stringify(filter.input)}`}
+				view={filter.input.view}
+				sort={filter.input.sort}
+				taskView={filter.taskView}
+				sellers={data.sellers ?? []}
 				action={base}
 				tab={filter.tab}
 				q={filter.input.q}
@@ -195,6 +150,40 @@ export function PancakeScreen({
 				}))}
 			/>
 			<Separator />
+			{filter.invalid && (
+				<Alert>
+					<AlertTitle>Đã đặt lại bộ lọc không hợp lệ</AlertTitle>
+					<AlertDescription>
+						Kiểm tra ngày và số trang trong đường dẫn.
+					</AlertDescription>
+				</Alert>
+			)}
+			{data.overview && (
+				<OperationsPanel
+					base={base}
+					values={values}
+					overview={data.overview}
+					shops={data.shops}
+				/>
+			)}
+			{data.tasks && (
+				<>
+					<TaskPanel
+						base={base}
+						values={values}
+						tasks={data.tasks}
+						taskView={filter.taskView}
+						demo={demo}
+					/>
+					<Pagination
+						base={base}
+						values={values}
+						page={filter.input.page}
+						total={data.tasks.total}
+					/>
+				</>
+			)}
+
 			{data.purchases && (
 				<Alert>
 					<AlertTitle>Lịch sử mua: {data.purchases.customer.name}</AlertTitle>
@@ -212,7 +201,7 @@ export function PancakeScreen({
 								<TableHead>Shop / đơn</TableHead>
 								<TableHead>Khách hàng</TableHead>
 								<TableHead>Trạng thái</TableHead>
-								<TableHead>Giá trị sản phẩm</TableHead>
+								<TableHead>Giá trị đơn</TableHead>
 								<TableHead>Nhân viên bán</TableHead>
 								<TableHead>Vận đơn</TableHead>
 								<TableHead>Cập nhật</TableHead>
@@ -230,7 +219,8 @@ export function PancakeScreen({
 												customerId: "",
 											})}
 										>
-											{order.shopId} / #{order.orderId}
+											{shopNames.get(order.shopId) ?? order.shopId} / #
+											{order.orderId}
 										</Link>
 									</TableCell>
 									<TableCell>
@@ -260,10 +250,7 @@ export function PancakeScreen({
 									<TableCell>
 										{amount(order.totalPrice, order.currency)}
 									</TableCell>
-									<TableCell>
-										{order.sellerName ?? "Chưa phân công"}
-										<div>{order.sellerId}</div>
-									</TableCell>
+									<TableCell>{order.sellerName ?? "Chưa phân công"}</TableCell>
 									<TableCell>{order.trackingCode ?? "Chưa có"}</TableCell>
 									<TableCell>{date(order.sourceUpdatedAt)}</TableCell>
 								</TableRow>
@@ -285,6 +272,26 @@ export function PancakeScreen({
 			)}
 			{data.detail && (
 				<>
+					{data.assignees && data.assignees.length > 0 && !demo && (
+						<Card>
+							<CardHeader>
+								<CardTitle>
+									Tạo công việc cho đơn #{data.detail.orderId}
+								</CardTitle>
+								<CardDescription>
+									Giao việc và lưu ghi chú chăm sóc trong CRM.
+								</CardDescription>
+							</CardHeader>
+							<CardContent>
+								<TaskCreate
+									shopId={data.detail.shopId}
+									orderId={data.detail.orderId}
+									assignees={data.assignees}
+								/>
+							</CardContent>
+						</Card>
+					)}
+
 					<h2 className="text-lg font-medium">
 						Đơn #{data.detail.orderId}: sản phẩm và lịch sử trạng thái
 					</h2>
@@ -298,7 +305,7 @@ export function PancakeScreen({
 						</TableHeader>
 						<TableBody>
 							{data.detail.items.map((item) => (
-								<TableRow key={`${item.productId}:${item.variationId}`}>
+								<TableRow key={item.lineNumber}>
 									<TableCell>
 										{item.name} / {item.variationId}
 									</TableCell>
@@ -328,7 +335,7 @@ export function PancakeScreen({
 										→ {STATUS_NAMES.get(event.status) ?? event.status}
 									</TableCell>
 									<TableCell>
-										{event.actorId ?? "Không được cung cấp"}
+										{event.actorName ?? "Không được cung cấp"}
 									</TableCell>
 									<TableCell>
 										{event.trackingCode ?? "—"} / {event.deliveryStatus ?? "—"}
@@ -362,12 +369,14 @@ export function PancakeScreen({
 						<TableBody>
 							{data.customers.rows.map((customer) => (
 								<TableRow key={`${customer.shopId}:${customer.customerId}`}>
-									<TableCell>{customer.shopId}</TableCell>
+									<TableCell>
+										{shopNames.get(customer.shopId) ?? customer.shopId}
+									</TableCell>
 									<TableCell>{customer.name}</TableCell>
 									<TableCell>{customer.phone}</TableCell>
 									<TableCell>{customer.email}</TableCell>
 									<TableCell>
-										{customer.assignedEmployeeId ?? "Chưa phân công"}
+										{customer.assignedEmployeeName ?? "Chưa phân công"}
 									</TableCell>
 									<TableCell>
 										<Link
@@ -411,13 +420,14 @@ export function PancakeScreen({
 						))}
 					</div>
 					<Alert>
-						<AlertTitle>Giá trị sản phẩm của đơn đã nhận / thu tiền</AlertTitle>
+						<AlertTitle>Giá trị đơn của đơn đã nhận / thu tiền</AlertTitle>
 						<AlertDescription>
 							{data.report.revenue.map((row) => (
 								<div key={row.currency}>{amount(row.amount, row.currency)}</div>
 							))}
-							Báo cáo gồm đơn đã nhận hàng hoặc đã thu tiền. Mỗi loại tiền tệ có
-							tổng riêng. Báo cáo chưa trừ phí, thuế và tiền hoàn một phần.
+							Báo cáo dùng quy ước giá trị đơn hiện tại của shop, cần đối chiếu.
+							Mỗi loại tiền tệ có tổng riêng. Báo cáo chưa trừ phí, thuế và tiền
+							hoàn một phần.
 						</AlertDescription>
 					</Alert>
 					<Table>
@@ -429,15 +439,14 @@ export function PancakeScreen({
 								<TableHead>Tỷ lệ giao thành công</TableHead>
 								<TableHead>Hủy</TableHead>
 								<TableHead>Hoàn</TableHead>
-								<TableHead>Doanh thu sản phẩm</TableHead>
+								<TableHead>Doanh thu tham khảo</TableHead>
 							</TableRow>
 						</TableHeader>
 						<TableBody>
 							{data.report.performance.map((row) => (
 								<TableRow key={`${row.shopId}:${row.sellerId}:${row.currency}`}>
 									<TableCell>
-										{row.shopId} / {row.sellerName}
-										<div>{row.sellerId}</div>
+										{shopNames.get(row.shopId) ?? row.shopId} / {row.sellerName}
 									</TableCell>
 									<TableCell>{row.orders}</TableCell>
 									<TableCell>{row.delivered}</TableCell>
@@ -464,7 +473,7 @@ export function PancakeScreen({
 									{shop.name} / {shop.id}
 								</CardTitle>
 								<CardDescription>
-									{shop.enabled ? "Đã bật" : "Đang dừng"} ·{" "}
+									{shop.syncEnabled ? "Đã bật" : "Đang dừng"} ·{" "}
 									{shop.liveApprovedAt
 										? "Đã duyệt đọc dữ liệu thật"
 										: "Chưa duyệt dữ liệu thật"}
@@ -509,7 +518,9 @@ export function PancakeScreen({
 						<TableBody>
 							{data.products.rows.map((product) => (
 								<TableRow key={`${product.shopId}:${product.variationId}`}>
-									<TableCell>{product.shopId}</TableCell>
+									<TableCell>
+										{shopNames.get(product.shopId) ?? product.shopId}
+									</TableCell>
 									<TableCell>{product.name}</TableCell>
 									<TableCell>{product.sku ?? product.variationId}</TableCell>
 									<TableCell>{product.price ?? "Chưa có"}</TableCell>

@@ -37,13 +37,18 @@ $nextMode = if ($Production) { 'start' } else { 'dev' }
 $apiEntry = if ($Production) { Join-Path $crmRoot 'apps\api\dist\main.js' } else { Join-Path $crmRoot 'apps\api\src\main.ts' }
 $apiProcess = Start-Process -FilePath $bunBinary -ArgumentList @($apiEntry) -WorkingDirectory (Join-Path $crmRoot 'apps\api') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logFolder 'api.log') -RedirectStandardError (Join-Path $logFolder 'api-error.log')
 $appProcess = Start-Process -FilePath $nodeBinary -ArgumentList @($nextBinary,$nextMode,'--hostname','127.0.0.1','--port','3100') -WorkingDirectory (Join-Path $crmRoot 'apps\app') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logFolder 'app.log') -RedirectStandardError (Join-Path $logFolder 'app-error.log')
-$processList = @(@{name='api';id=$apiProcess.Id},@{name='app';id=$appProcess.Id})
+$processList = @(@{name='api';id=$apiProcess.Id;startedAt=$apiProcess.StartTime.ToUniversalTime().ToString('o')},@{name='app';id=$appProcess.Id;startedAt=$appProcess.StartTime.ToUniversalTime().ToString('o')})
 if (-not $Demo) {
   $workerProcess = Start-Process -FilePath $bunBinary -ArgumentList @((Join-Path $crmRoot 'apps\pancake-sync\src\main.ts')) -WorkingDirectory $crmRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logFolder 'pancake-worker.log') -RedirectStandardError (Join-Path $logFolder 'pancake-worker-error.log')
-  $processList += @{name='pancake-worker';id=$workerProcess.Id}
+  try {
+    $workerStartedAt = $workerProcess.StartTime.ToUniversalTime().ToString('o')
+    $processList += @{name='pancake-worker';id=$workerProcess.Id;startedAt=$workerStartedAt}
+  } catch {
+    if (-not $workerProcess.HasExited) { throw }
+  }
 }
 $processList | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $logFolder 'processes.json')
-$startupDeadline = [DateTime]::UtcNow.AddSeconds(20)
+$startupDeadline = [DateTime]::UtcNow.AddSeconds(60)
 do {
   $apiReady = Get-NetTCPConnection -LocalPort 3101 -State Listen -ErrorAction SilentlyContinue
   $appReady = Get-NetTCPConnection -LocalPort 3100 -State Listen -ErrorAction SilentlyContinue

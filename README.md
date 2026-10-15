@@ -190,7 +190,7 @@ Written up where the work happens, not in a style guide:
 ## Quick start
 
 Windows with existing PostgreSQL and a read-only Pancake POS integration:
-[deployment guide](./docs/pancake-windows.md) and [audit report](./docs/pancake-audit.md).
+[deployment guide](./docs/pancake-windows.md), [audit report](./docs/pancake-audit.md), and [operations, tasks and read-only MCP](./docs/pancake-rebuild.md).
 
 You need [Bun](https://bun.com) and Docker.
 

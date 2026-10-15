@@ -7,14 +7,14 @@ import {
 	PancakeAccessError,
 	shopGrants,
 } from "./access";
-import { PANCAKE } from "./config";
-import { phoneTail } from "./phone";
+import { ORDER_VIEWS, PANCAKE, RESOURCES } from "./config";
 import {
 	type ListInput,
 	orderWire,
 	type roleInput,
 	sourceDate,
 } from "./contracts";
+import { phoneTail } from "./phone";
 
 export function filteredOrders(
 	scope: Prisma.PancakeOrderWhereInput,
@@ -36,7 +36,30 @@ export function filteredOrders(
 				]
 			: undefined,
 	};
-	return { AND: [scope, filters] };
+	const view = ORDER_VIEWS[input.view];
+	return {
+		AND: [
+			scope,
+			filters,
+			input.view === "unassigned"
+				? { sellerId: null }
+				: view.statuses.length
+					? { status: { in: [...view.statuses] } }
+					: {},
+		],
+	};
+}
+
+function orderSort(
+	input: ListInput,
+): Prisma.PancakeOrderOrderByWithRelationInput[] {
+	return [
+		input.sort === "updated"
+			? { sourceUpdatedAt: "desc" }
+			: { sourceCreatedAt: input.sort === "oldest" ? "asc" : "desc" },
+		{ shopId: "asc" },
+		{ orderId: "asc" },
+	];
 }
 
 const orderSelect = {
@@ -65,11 +88,7 @@ export async function listOrders(db: Db, userId: string, input: ListInput) {
 		db.pancakeOrder.findMany({
 			where,
 			select: orderSelect,
-			orderBy: [
-				{ sourceCreatedAt: "desc" },
-				{ shopId: "asc" },
-				{ orderId: "asc" },
-			],
+			orderBy: orderSort(input),
 			skip: (input.page - 1) * input.pageSize,
 			take: input.pageSize,
 		}),
@@ -92,7 +111,8 @@ export async function orderDetail(
 	shopId: string,
 	orderId: string,
 ) {
-	const scope = orderScope(await shopGrants(db, userId), shopId);
+	const grants = await shopGrants(db, userId);
+	const scope = orderScope(grants, shopId);
 	const row = await db.pancakeOrder.findFirst({
 		where: { AND: [scope, { shopId, orderId }] },
 		include: { history: { orderBy: [{ occurredAt: "asc" }, { id: "asc" }] } },
@@ -108,9 +128,20 @@ export async function orderDetail(
 			sourceUpdatedAt: true,
 		},
 	});
+	const actorIds = row.history.flatMap((event) =>
+		event.actorId ? [event.actorId] : [],
+	);
+	const actors = await db.pancakeEmployee.findMany({
+		where: { shopId, employeeId: { in: actorIds } },
+		select: { employeeId: true, name: true },
+	});
+	const actorNames = new Map(actors.map((a) => [a.employeeId, a.name]));
 	return {
 		shopId,
 		orderId,
+		canCreateTask: grants.some(
+			(grant) => grant.shopId === shopId && grant.role !== "VIEWER",
+		),
 		customerId: row.customerId,
 		customerName: row.customerName,
 		shippingHistory: (incoming.partner?.extend_update ?? []).map((event) => ({
@@ -122,11 +153,15 @@ export async function orderDetail(
 				? sourceDate(event.update_at).toISOString()
 				: null,
 		})),
-		items: incoming.items.map((item) => ({
+		items: incoming.items.map((item, position) => ({
+			lineNumber: position + 1,
 			variationId: item.variation_id ?? null,
 			productId: item.product_id ?? null,
 			name:
-				item.variation_info?.name ?? item.product_id ?? item.variation_id ?? null,
+				item.variation_info?.name ??
+				item.product_id ??
+				item.variation_id ??
+				null,
 			quantity: item.quantity,
 			returnedCount: item.returned_count ?? 0,
 		})),
@@ -137,7 +172,7 @@ export async function orderDetail(
 			subStatus: event.subStatus,
 			deliveryStatus: event.deliveryStatus,
 			trackingCode: event.trackingCode,
-			actorId: event.actorId,
+			actorName: event.actorId ? (actorNames.get(event.actorId) ?? null) : null,
 			occurredAt: event.occurredAt.toISOString(),
 			source: event.source,
 		})),
@@ -202,7 +237,25 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 		}),
 		db.pancakeCustomer.count({ where }),
 	]);
-	return { rows, total };
+	const staff = await db.pancakeEmployee.findMany({
+		where: {
+			shopId: { in: selected.map((grant) => grant.shopId) },
+			employeeId: { in: rows.flatMap((r) => r.assignedEmployeeId ?? []) },
+		},
+		select: { shopId: true, employeeId: true, name: true },
+	});
+	const names = new Map(
+		staff.map((s) => [`${s.shopId}:${s.employeeId}`, s.name]),
+	);
+	return {
+		rows: rows.map(({ assignedEmployeeId, ...row }) => ({
+			...row,
+			assignedEmployeeName: assignedEmployeeId
+				? (names.get(`${row.shopId}:${assignedEmployeeId}`) ?? null)
+				: null,
+		})),
+		total,
+	};
 }
 
 export async function customerPurchases(
@@ -212,8 +265,8 @@ export async function customerPurchases(
 	customerId: string,
 	input: ListInput,
 ) {
-	const scope = orderScope(await shopGrants(db, userId), shopId);
 	const grants = await shopGrants(db, userId);
+	const scope = orderScope(grants, shopId);
 	const grant = grants.find((item) => item.shopId === shopId);
 	const customer = await db.pancakeCustomer.findUnique({
 		where: { shopId_customerId: { shopId, customerId } },
@@ -235,7 +288,7 @@ export async function customerPurchases(
 		db.pancakeOrder.findMany({
 			where,
 			select: orderSelect,
-			orderBy: { sourceCreatedAt: "desc" },
+			orderBy: orderSort(input),
 			skip: (input.page - 1) * input.pageSize,
 			take: input.pageSize,
 		}),
@@ -313,6 +366,75 @@ export async function revenueReport(db: Db, userId: string, input: ListInput) {
 		orders: group._count._all,
 		productValue: group._sum.totalPrice?.toString() ?? "0",
 	}));
+}
+
+export async function operationsOverview(
+	db: Db,
+	userId: string,
+	input: ListInput,
+) {
+	const scope = orderScope(await shopGrants(db, userId), input.shopId);
+	const where = filteredOrders(scope, input);
+	const [statuses, unassigned, overdue, recent] = await Promise.all([
+		db.pancakeOrder.groupBy({ by: ["status"], where, _count: { _all: true } }),
+		db.pancakeOrder.count({ where: { AND: [where, { sellerId: null }] } }),
+		db.pancakeTask.count({
+			where: { order: scope, status: "OPEN", dueAt: { lt: new Date() } },
+		}),
+		db.pancakeOrder.findMany({
+			where,
+			select: orderSelect,
+			orderBy: [
+				{ sourceUpdatedAt: "desc" },
+				{ shopId: "asc" },
+				{ orderId: "asc" },
+			],
+			take: PANCAKE.overviewRows,
+		}),
+	]);
+	const total = (values: readonly number[]) =>
+		statuses.reduce(
+			(sum, row) => sum + (values.includes(row.status) ? row._count._all : 0),
+			0,
+		);
+	return {
+		orders: statuses.reduce((sum, row) => sum + row._count._all, 0),
+		pending: total(ORDER_VIEWS.pending.statuses),
+		shipping: total(ORDER_VIEWS.shipping.statuses),
+		returns: total(ORDER_VIEWS.returns.statuses),
+		unassigned,
+		overdue,
+		statuses: statuses.map((row) => ({
+			status: row.status,
+			count: row._count._all,
+		})),
+		recent: recent.map((row) => ({
+			...row,
+			totalPrice: row.totalPrice.toString(),
+			sourceCreatedAt: row.sourceCreatedAt.toISOString(),
+			sourceUpdatedAt: row.sourceUpdatedAt.toISOString(),
+		})),
+	};
+}
+
+export async function sellerOptions(db: Db, userId: string, shopId?: string) {
+	const grants = await shopGrants(db, userId);
+	orderScope(grants, shopId);
+	return db.pancakeEmployee.findMany({
+		where: {
+			OR: grants
+				.filter((grant) => !shopId || grant.shopId === shopId)
+				.map((grant) => ({
+					shopId: grant.shopId,
+					employeeId:
+						grant.role === "TELESALE"
+							? (grant.employeeId ?? "__unmapped__")
+							: undefined,
+				})),
+		},
+		select: { shopId: true, employeeId: true, name: true },
+		orderBy: [{ name: "asc" }, { shopId: "asc" }, { employeeId: "asc" }],
+	});
 }
 
 export async function dashboardReport(
@@ -423,6 +545,15 @@ export async function connectionStatus(db: Db, userId: string) {
 	});
 	return shops.map((shop) => ({
 		...shop,
+		syncEnabled: process.env.PANCAKE_LIVE_SYNC_ENABLED === "1" && shop.enabled,
+		historyComplete: RESOURCES.every((resource) =>
+			shop.cursors.some(
+				(cursor) =>
+					cursor.resource === resource &&
+					cursor.phase !== "history" &&
+					cursor.watermark !== null,
+			),
+		),
 		lastSyncAt: shop.lastSyncAt?.toISOString() ?? null,
 		lastWebhookAt: shop.lastWebhookAt?.toISOString() ?? null,
 		liveApprovedAt: shop.liveApprovedAt?.toISOString() ?? null,

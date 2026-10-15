@@ -149,9 +149,7 @@ export async function storeRecord(
 		subStatus: item.sub_status ?? null,
 		currency,
 		// Foreign-currency shops send amounts in minor units (x100); VND has none.
-		totalPrice:
-			(item.shipping_fee ?? 0) /
-			(currency === "VND" ? 1 : 100),
+		totalPrice: (item.shipping_fee ?? 0) / (currency === "VND" ? 1 : 100),
 		trackingCode: item.partner?.extend_code ?? null,
 		trackingUrl: item.tracking_link ?? null,
 		deliveryStatus,
