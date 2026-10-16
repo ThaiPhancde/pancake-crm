@@ -158,10 +158,12 @@ async function Tickets({
 								<Badge key="status" variant="blue">
 									{statusOpt?.label ?? ticket.status}
 								</Badge>,
-								ticket.assigneeId
-									? (sellerMap.get(ticket.assigneeId) ?? ticket.assigneeId)
-									: <Dash />,
-								ticket.dueAt ? formatDate(ticket.dueAt) : <Dash />,
+								ticket.assigneeId ? (
+									(sellerMap.get(ticket.assigneeId) ?? ticket.assigneeId)
+								) : (
+									<Dash key="assignee" />
+								),
+								ticket.dueAt ? formatDate(ticket.dueAt) : <Dash key="dueAt" />,
 							],
 						};
 					})}

@@ -187,13 +187,15 @@ async function Appointments({
 										item.contactName ?? <Dash />,
 										item.phone ?? <Dash />,
 										formatDate(item.startAt),
-										item.endAt ? formatDate(item.endAt) : <Dash />,
+										item.endAt ? formatDate(item.endAt) : <Dash key="endAt" />,
 										<Badge key="status" variant="blue">
 											{statusOpt?.label ?? item.status}
 										</Badge>,
-										item.assigneeId
-											? (sellerMap.get(item.assigneeId) ?? item.assigneeId)
-											: <Dash />,
+										item.assigneeId ? (
+											(sellerMap.get(item.assigneeId) ?? item.assigneeId)
+										) : (
+											<Dash key="assignee" />
+										),
 									],
 								};
 							})}
