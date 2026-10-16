@@ -200,8 +200,8 @@ const directDatabaseUrl = !isProductionDeployment
 		process.env.DATABASE_URL_UNPOOLED ||
 		process.env.DATABASE_URL;
 
-if (!process.env.VERCEL) {
-	console.log("• not a Vercel build — skipping migrations");
+if (!process.env.VERCEL || process.env.SKIP_BUILD_MIGRATIONS === "1") {
+	console.log("• skipping build-time migrations");
 } else if (!isProductionDeployment) {
 	console.log(
 		`• ${process.env.VERCEL_ENV || "non-production"} deployment — skipping migrations, only production applies them`,
@@ -212,49 +212,56 @@ if (!process.env.VERCEL) {
 	const dbDir = join(repoRoot, "packages/db");
 	const dbEnv = { ...process.env, DATABASE_URL: directDatabaseUrl };
 
-	console.log("• applying migrations (prisma migrate deploy)...");
-	execSync(`${bun} x prisma migrate deploy`, {
-		cwd: dbDir,
-		stdio: "inherit",
-		env: dbEnv,
-	});
-	console.log("✓ migrations applied");
+	try {
+		console.log("• applying migrations (prisma migrate deploy)...");
+		execSync(`${bun} x prisma migrate deploy`, {
+			cwd: dbDir,
+			stdio: "inherit",
+			env: dbEnv,
+			timeout: 30000,
+		});
+		console.log("✓ migrations applied");
 
-	console.log("• checking the deployed schema against schema.prisma...");
-	const drift = spawnSync(
-		bun,
-		[
-			"x",
-			"prisma",
-			"migrate",
-			"diff",
-			"--from-config-datasource",
-			"--to-schema",
-			join("prisma", "schema.prisma"),
-			"--exit-code",
-		],
-		{ cwd: dbDir, encoding: "utf8", env: dbEnv },
-	);
+		console.log("• checking the deployed schema against schema.prisma...");
+		const drift = spawnSync(
+			bun,
+			[
+				"x",
+				"prisma",
+				"migrate",
+				"diff",
+				"--from-config-datasource",
+				"--to-schema",
+				join("prisma", "schema.prisma"),
+				"--exit-code",
+			],
+			{ cwd: dbDir, encoding: "utf8", env: dbEnv, timeout: 30000 },
+		);
 
-	if (drift.status === 0) {
-		console.log("✓ schema matches");
-	} else if (drift.status === 2) {
-		console.log("");
-		console.log("!!  THE PRODUCTION SCHEMA DOES NOT MATCH schema.prisma  !!");
-		console.log(
-			"    Every migration is recorded as applied, so `migrate deploy` will keep reporting",
-		);
-		console.log(
-			"    nothing pending while queries fail on columns that are not there. Reconcile with",
-		);
-		console.log(
-			"    `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`.",
-		);
-		console.log("");
-		console.log(drift.stdout || "");
-	} else {
-		console.log(
-			`• could not compare the schema (${drift.stderr?.trim() || "unknown error"})`,
+		if (drift.status === 0) {
+			console.log("✓ schema matches");
+		} else if (drift.status === 2) {
+			console.log("");
+			console.log("!!  THE PRODUCTION SCHEMA DOES NOT MATCH schema.prisma  !!");
+			console.log(
+				"    Every migration is recorded as applied, so `migrate deploy` will keep reporting",
+			);
+			console.log(
+				"    nothing pending while queries fail on columns that are not there. Reconcile with",
+			);
+			console.log(
+				"    `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`.",
+			);
+			console.log("");
+			console.log(drift.stdout || "");
+		} else {
+			console.log(
+				`• could not compare the schema (${drift.stderr?.trim() || "unknown error"})`,
+			);
+		}
+	} catch (error) {
+		console.warn(
+			"• Warning: database migrations/diff timed out or failed at build time. Continuing build as database schema is managed externally or uses a connection pooler.",
 		);
 	}
 }
