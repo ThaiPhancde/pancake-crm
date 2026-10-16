@@ -2,7 +2,7 @@
 	"name": "crm",
 	"private": true,
 	"license": "MIT",
-	"version": "1.15.3",
+	"version": "1.16.0",
 	"scripts": {
 		"pancake:test": "bun scripts/test-pancake.ts",
 		"pancake:configure": "bun scripts/configure-pancake.ts",
