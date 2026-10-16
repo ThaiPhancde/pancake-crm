@@ -13,7 +13,9 @@ import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
 import {
 	COLLECTIONS,
+	type CollectionKey,
 	FIELD_TYPES,
+	type FieldType,
 	fieldSections,
 	isCollectionKey,
 } from "@/components/shop/collections";
@@ -21,7 +23,7 @@ import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { FieldInput } from "@/components/shop/record-sheet";
 import { SettingsFrame } from "@/components/shop/settings-frame";
 
-const ENTITY_BACK_PATH: Record<string, string> = {
+const ENTITY_BACK_PATH = {
 	lead: "/leads",
 	contact: "/contacts",
 	order: "/orders",
@@ -29,22 +31,25 @@ const ENTITY_BACK_PATH: Record<string, string> = {
 	appointment: "/calendar",
 	ticket: "/tickets",
 	task: "/reports/tasks",
-};
+} satisfies Record<CollectionKey, string>;
 
-const FIELD_ICON_SYMBOL: Record<string, string> = {
+const FIELD_ICON_SYMBOL = {
 	phone: "📞",
 	money: "$",
 	number: "123",
 	text: "T=",
 	textarea: "¶",
 	datetime: "📅",
+	date: "📆",
 	boolean: "✓",
 	select: "◉",
 	multiselect: "☑",
 	email: "✉",
 	url: "🌐",
 	formula: "fx",
-};
+	user: "👤",
+	relation: "🔗",
+} satisfies Record<FieldType, string>;
 
 export default function FieldsPage({
 	params,
@@ -66,7 +71,7 @@ async function Fields({
 	const [ctx, { entity }] = await Promise.all([loadShop(params), params]);
 	if (!isCollectionKey(entity)) notFound();
 	const collection = COLLECTIONS[entity];
-	const backHref = `${ctx.base}${ENTITY_BACK_PATH[entity] ?? ""}`;
+	const backHref = `${ctx.base}${ENTITY_BACK_PATH[entity]}`;
 	const sections = fieldSections(collection.fields);
 
 	return (
@@ -171,7 +176,7 @@ async function Fields({
 									<span
 										className={`flex size-9 shrink-0 items-center justify-center rounded-lg font-semibold text-white text-xs shadow-2xs ${item.tone}`}
 									>
-										{FIELD_ICON_SYMBOL[item.type] ?? item.label.charAt(0)}
+										{FIELD_ICON_SYMBOL[item.type]}
 									</span>
 									<span className="font-medium text-foreground">
 										{item.label}

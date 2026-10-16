@@ -6,7 +6,7 @@ const url = process.env.DATABASE_URL ?? "";
 assertCrmDatabase(url);
 const parsed = new URL(url);
 if (
-	!["/CRM", "/comp_ai_crm"].includes(parsed.pathname) ||
+	!["/crm", "/comp_ai_crm"].includes(parsed.pathname.toLowerCase()) ||
 	parsed.password === "CHANGE_ME"
 )
 	throw new Error(

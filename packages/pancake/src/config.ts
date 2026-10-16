@@ -13,7 +13,7 @@ export const PANCAKE = {
 	historyPageBudget: 60,
 	recentWindowMs: 172_800_000,
 	recentPageBudget: 20,
-	transactionMs: 60_000,
+	transactionMs: 300_000,
 	webhookMaxBytes: 1_048_576,
 	webhookMaxAttempts: 8,
 	webhookBatch: 25,
@@ -32,7 +32,13 @@ export const PANCAKE = {
 		["1328205216", "966"],
 		["1328205226", "965"],
 	]),
-	databaseNames: ["CRM", "comp_ai_crm", "comp_ai_crm_test", "comp_ai_crm_demo"],
+	databaseNames: [
+		"CRM",
+		"crm",
+		"comp_ai_crm",
+		"comp_ai_crm_test",
+		"comp_ai_crm_demo",
+	],
 } as const;
 
 export const ORDER_VIEWS = {
@@ -77,7 +83,11 @@ export function assertCrmDatabase(url: string): void {
 	if (!["postgresql:", "postgres:"].includes(parsed.protocol))
 		throw new Error("Use a PostgreSQL URI without a Python driver suffix.");
 	const name = parsed.pathname.slice(1);
-	if (!PANCAKE.databaseNames.some((allowed) => allowed === name)) {
+	if (
+		!PANCAKE.databaseNames.some(
+			(allowed) => allowed.toLowerCase() === name.toLowerCase(),
+		)
+	) {
 		throw new Error(
 			"Pancake requires a dedicated CRM or comp_ai_crm database. Other databases are refused.",
 		);

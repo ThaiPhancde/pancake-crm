@@ -1,13 +1,13 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 $crmRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $config = Import-PowerShellDataFile (Join-Path $PSScriptRoot 'Runtime-Config.psd1')
 $taskName = 'CompAI-CRM-Pancake'
 $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existing -and -not ($existing.Actions.Arguments -like "*$crmRoot*")) { throw 'Task name belongs to another application. Registration is refused.' }
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$shellBinary = (Get-Command powershell.exe -ErrorAction Stop).Source
-$startScript = Join-Path $PSScriptRoot 'Start-Crm.ps1'
-$action = New-ScheduledTaskAction -Execute $shellBinary -Argument ('-NoProfile -WindowStyle Hidden -File "{0}" -Production -EnsureRunning' -f $startScript) -WorkingDirectory $crmRoot
+$wscriptBinary = (Get-Command wscript.exe -ErrorAction Stop).Source
+$vbsRunner = Join-Path $PSScriptRoot 'Run-SilentCrmMonitor.vbs'
+$action = New-ScheduledTaskAction -Execute $wscriptBinary -Argument ('"{0}"' -f $vbsRunner) -WorkingDirectory $crmRoot
 $logon = New-ScheduledTaskTrigger -AtLogOn -User $identity
 $periodic = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes($config.MonitorIntervalMinutes) -RepetitionInterval (New-TimeSpan -Minutes $config.MonitorIntervalMinutes)
 $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
