@@ -13,6 +13,7 @@
 		"**/.scratch/**",
 		".agents/**",
 		".claude/**",
+		"apps/api/api/**",
 		"apps/api/src/generated/**",
 		"packages/db/src/generated/**",
 		"packages/ui/src/components/**",

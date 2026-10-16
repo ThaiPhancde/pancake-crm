@@ -46,24 +46,32 @@ const slackCredentials = ():
 	| { clientId: string; clientSecret: string }
 	| undefined => pair("SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET");
 
-const apiUrl =
-	optional("API_URL") ?? optional("BETTER_AUTH_URL") ?? DEFAULT_API_URL;
+const cleanUrl = (url: string): string => url.replace(/\/+$/, "");
+
+const apiUrl = cleanUrl(
+	optional("API_URL") ?? DEFAULT_API_URL,
+);
 
 const appUrls = (optional("APP_URL") ?? DEFAULT_APP_URL)
 	.split(",")
-	.map((origin) => origin.trim())
+	.map((origin) => cleanUrl(origin.trim()))
 	.filter(Boolean);
 
 const appUrl = appUrls[0] ?? DEFAULT_APP_URL;
 
+const authUrl = cleanUrl(
+	optional("BETTER_AUTH_URL") ?? appUrl,
+);
+
 export const env = {
 	apiUrl,
 	appUrl,
+	authUrl,
 	google: googleCredentials(),
 	microsoft: microsoftCredentials(),
 	slack: slackCredentials(),
 	cookieDomain: optional("AUTH_COOKIE_DOMAIN"),
-	trustedOrigins: [...new Set([...appUrls, apiUrl])],
+	trustedOrigins: [...new Set([...appUrls, apiUrl, authUrl])],
 	isProduction: process.env.NODE_ENV === "production",
 } as const;
 
@@ -79,4 +87,4 @@ export function isSlackConfigured(): boolean {
 	return env.slack !== undefined;
 }
 
-export { apiUrl, appUrl };
+export { apiUrl, appUrl, authUrl };

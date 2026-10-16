@@ -288282,17 +288282,20 @@ var microsoftCredentials = () => {
   };
 };
 var slackCredentials = () => pair("SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET");
-var apiUrl = optional2("API_URL") ?? optional2("BETTER_AUTH_URL") ?? DEFAULT_API_URL;
-var appUrls = (optional2("APP_URL") ?? DEFAULT_APP_URL).split(",").map((origin) => origin.trim()).filter(Boolean);
+var cleanUrl = (url2) => url2.replace(/\/+$/, "");
+var apiUrl = cleanUrl(optional2("API_URL") ?? DEFAULT_API_URL);
+var appUrls = (optional2("APP_URL") ?? DEFAULT_APP_URL).split(",").map((origin) => cleanUrl(origin.trim())).filter(Boolean);
 var appUrl = appUrls[0] ?? DEFAULT_APP_URL;
+var authUrl = cleanUrl(optional2("BETTER_AUTH_URL") ?? appUrl);
 var env3 = {
   apiUrl,
   appUrl,
+  authUrl,
   google: googleCredentials(),
   microsoft: microsoftCredentials(),
   slack: slackCredentials(),
   cookieDomain: optional2("AUTH_COOKIE_DOMAIN"),
-  trustedOrigins: [...new Set([...appUrls, apiUrl])],
+  trustedOrigins: [...new Set([...appUrls, apiUrl, authUrl])],
   isProduction: false
 };
 function isGoogleConfigured() {
@@ -288938,7 +288941,7 @@ function isWorkspaceEmail(email3) {
 // ../../packages/auth/src/auth.ts
 var socialProviders2 = {};
 var slackOAuth = env3.slack;
-var slackRedirectUri = new URL("/api/auth/oauth2/callback/slack", env3.apiUrl).toString();
+var slackRedirectUri = new URL("/api/auth/oauth2/callback/slack", env3.authUrl).toString();
 if (env3.google) {
   const google2 = {
     ...env3.google,
@@ -288965,7 +288968,7 @@ if (env3.microsoft) {
 }
 var auth = betterAuth({
   appName: "CRM",
-  baseURL: env3.apiUrl,
+  baseURL: env3.authUrl,
   database: prismaAdapter(db3, {
     provider: "postgresql"
   }),
@@ -289171,7 +289174,7 @@ function canConfigureSso(role2) {
   return isWorkspaceAdmin(role2);
 }
 function ssoCallbackBase() {
-  return `${apiUrl}/api/auth/sso/callback`;
+  return `${authUrl}/api/auth/sso/callback`;
 }
 function ssoCallbackURL(providerId) {
   return `${ssoCallbackBase()}/${providerId}`;
