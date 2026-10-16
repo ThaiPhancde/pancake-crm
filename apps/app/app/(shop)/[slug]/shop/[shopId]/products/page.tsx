@@ -116,7 +116,10 @@ async function Products({
 						return {
 							key: product.variationId,
 							cells: [
-								<span key="name" className="flex items-center gap-2 font-medium">
+								<span
+									key="name"
+									className="flex items-center gap-2 font-medium"
+								>
 									{product.name}
 									{product.hidden ? <Badge variant="gray">Đã ẩn</Badge> : null}
 								</span>,

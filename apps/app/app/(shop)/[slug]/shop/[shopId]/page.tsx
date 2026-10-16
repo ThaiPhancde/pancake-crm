@@ -111,8 +111,7 @@ async function Home({
 			ctx.api.customers.query({ ...scopedInput, pageSize: 1 }),
 			ctx.api.tasks.query({
 				...filter.input,
-				taskView:
-					view === "personal" && taskTab === "open" ? "mine" : taskTab,
+				taskView: view === "personal" && taskTab === "open" ? "mine" : taskTab,
 				pageSize: 8,
 			}),
 			ctx.api.leads.query({
