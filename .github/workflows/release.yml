@@ -19,13 +19,38 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Resolve release automation token
+        id: token
+        env:
+          AUTOMATION_TOKEN: ${{ secrets.AUTOMATION_TOKEN }}
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          token="${AUTOMATION_TOKEN:-${RELEASE_PLEASE_TOKEN:-}}"
+
+          if [ -z "$token" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "**Release PR automation is skipped.**"
+              echo
+              echo "GitHub Actions cannot create pull requests with \`GITHUB_TOKEN\` in this repository."
+              echo "Set \`AUTOMATION_TOKEN\` or \`RELEASE_PLEASE_TOKEN\` with pull request write access."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
       - uses: googleapis/release-please-action@v5
         id: release
+        if: steps.token.outputs.enabled == 'true'
         with:
           config-file: .github/release-please-config.json
           manifest-file: .github/.release-please-manifest.json
           target-branch: main
-          token: ${{ secrets.AUTOMATION_TOKEN || secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.token.outputs.token }}
 
       # `release` carries a ruleset that requires a pull request, and the only
       # bypass is the admin role. So this cannot push a merge commit itself:
@@ -35,9 +60,9 @@ jobs:
       # A pull request from `main` is the one door that is open, which is also
       # what `pr-base.yml` assumes when it leaves a `main` head alone.
       - name: Put the tag on release
-        if: steps.release.outputs.tag_name || github.event_name == 'workflow_dispatch'
+        if: steps.token.outputs.enabled == 'true' && (steps.release.outputs.tag_name || github.event_name == 'workflow_dispatch')
         env:
-          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ steps.release.outputs.tag_name }}
           URL: ${{ steps.release.outputs.html_url }}
@@ -88,8 +113,9 @@ jobs:
           echo "No tag this run — either the release pull request is still open, or nothing releasable landed." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail on a merged release pull request that was never tagged
+        if: steps.token.outputs.enabled == 'true'
         env:
-          GH_TOKEN: ${{ secrets.AUTOMATION_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -euo pipefail
 
