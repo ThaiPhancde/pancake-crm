@@ -26,7 +26,7 @@ import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
 import { googleConnectionStatusOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
-import { listInput, roleInput } from "@crm/pancake/contracts";
+import { listInput, customerDetailInput, roleInput, approveEmployeeInput, recordListInput, createLeadInput, createAppointmentInput, createTicketInput, createNoteInput } from "@crm/pancake/contracts";
 import { taskListInput, createTaskInput, updateTaskInput } from "@crm/pancake/tasks";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput } from "../settings/settings.contracts";
@@ -604,6 +604,9 @@ const appRouter = t.router({
     customers: publicProcedure
       .input(listInput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["customers"]>>),
+    customerDetail: publicProcedure
+      .input(customerDetailInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["customerDetail"]>>),
     products: publicProcedure
       .input(listInput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["products"]>>),
@@ -628,9 +631,36 @@ const appRouter = t.router({
     setMembership: publicProcedure
       .input(roleInput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["setMembership"]>>),
+    approveEmployee: publicProcedure
+      .input(approveEmployeeInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["approveEmployee"]>>),
+    approveAllEmployees: publicProcedure
+      .input(z.object({ shopId: z.string().min(1) }))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["approveAllEmployees"]>>),
     pause: publicProcedure
       .input(z.object({ shopId: z.string().min(1) }))
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["pause"]>>)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["pause"]>>),
+    leads: publicProcedure
+      .input(recordListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["leads"]>>),
+    createLead: publicProcedure
+      .input(createLeadInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["createLead"]>>),
+    appointments: publicProcedure
+      .input(recordListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["appointments"]>>),
+    createAppointment: publicProcedure
+      .input(createAppointmentInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["createAppointment"]>>),
+    tickets: publicProcedure
+      .input(recordListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["tickets"]>>),
+    createTicket: publicProcedure
+      .input(createTicketInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["createTicket"]>>),
+    createNote: publicProcedure
+      .input(createNoteInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["createNote"]>>)
     }),
   savedViews: t.router({
     list: publicProcedure

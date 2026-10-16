@@ -37,6 +37,37 @@ export const customerWire = z
 		assigned_user_id: nullableText,
 		updated_at: sourceTime.nullish(),
 		inserted_at: sourceTime.nullish(),
+		date_of_birth: nullableText,
+		gender: nullableText,
+		tags: z.array(z.string()).nullish(),
+		order_count: z.number().int().nonnegative().nullish(),
+		purchased_amount: money.nullish(),
+		conversation_link: nullableText,
+		pages_customers: z
+			.array(
+				z
+					.object({
+						id: sourceId.optional(),
+						name: nullableText,
+						platform: nullableText,
+					})
+					.passthrough(),
+			)
+			.nullish(),
+		shop_customer_addresses: z
+			.array(
+				z
+					.object({
+						address: nullableText,
+						full_address: nullableText,
+						province_id: nullableText,
+						district_id: nullableText,
+						commune_id: nullableText,
+						country_code: z.union([z.string(), z.number()]).nullish(),
+					})
+					.passthrough(),
+			)
+			.nullish(),
 	})
 	.passthrough();
 export const productWire = z
@@ -45,11 +76,21 @@ export const productWire = z
 		product_id: sourceId,
 		updated_at: sourceTime.nullish(),
 		inserted_at: sourceTime.nullish(),
+		images: z.array(z.string()).nullish(),
 		product: z
 			.object({
 				name: z.string(),
 				display_id: nullableText,
 				updated_at: sourceTime.nullish(),
+				image: nullableText,
+				note_product: nullableText,
+				categories: z
+					.array(
+						z
+							.object({ id: sourceId.optional(), name: nullableText })
+							.passthrough(),
+					)
+					.nullish(),
 			})
 			.passthrough(),
 		display_id: nullableText,
@@ -65,11 +106,20 @@ export const employeeWire = z
 	.object({
 		user_id: sourceId,
 		shop_id: sourceId.optional(),
+		role: sourceId.nullish(),
+		profile_id: nullableText,
+		department: z
+			.object({ id: sourceId.optional(), name: nullableText })
+			.passthrough()
+			.nullish(),
 		user: z
 			.object({
 				id: sourceId.optional(),
 				name: z.string(),
 				email: nullableText,
+				avatar_url: nullableText,
+				phone_number: nullableText,
+				fb_id: nullableText,
 			})
 			.passthrough(),
 	})
@@ -87,6 +137,25 @@ export const orderWire = z
 		order_currency: z
 			.string()
 			.regex(/^[A-Z]{3}$/)
+			.nullish(),
+		total_discount: money.nullish(),
+		order_sources_name: nullableText,
+		ads_source: nullableText,
+		note: nullableText,
+		page: z
+			.object({
+				id: sourceId.optional(),
+				name: nullableText,
+				platform: nullableText,
+			})
+			.passthrough()
+			.nullish(),
+		shipping_address: z
+			.object({
+				full_address: nullableText,
+				address: nullableText,
+			})
+			.passthrough()
 			.nullish(),
 		bill_full_name: nullableText,
 		bill_phone_number: nullableText,
@@ -220,6 +289,73 @@ export const roleInput = z
 		(v) => v.role !== "TELESALE" || Boolean(v.employeeId),
 		"Telesale requires a Pancake employee mapping",
 	);
+export const approveEmployeeInput = z.object({
+	shopId: z.string().min(1),
+	employeeId: z.string().min(1),
+	role: z.enum(["MANAGER", "TELESALE", "VIEWER"]).default("TELESALE"),
+});
+export const customerDetailInput = z.object({
+	shopId: z.string().min(1),
+	customerId: z.string().min(1),
+});
+export const recordListInput = z.object({
+	shopId: z.string().min(1),
+	q: z.string().max(120).default(""),
+	status: z.string().max(80).optional(),
+	assigneeId: z.string().max(120).optional(),
+	customerId: z.string().max(120).optional(),
+	from: z.iso.datetime({ offset: true }).optional(),
+	to: z.iso.datetime({ offset: true }).optional(),
+	page: z.number().int().min(1).max(100_000).default(1),
+	pageSize: z.number().int().min(1).max(PANCAKE.maxListSize).default(25),
+});
+export type RecordListInput = z.infer<typeof recordListInput>;
+export const createLeadInput = z.object({
+	shopId: z.string().min(1),
+	name: z.string().trim().min(1).max(160),
+	phone: z.string().trim().max(60).optional(),
+	email: z.string().trim().max(160).optional(),
+	assigneeId: z.string().max(120).optional(),
+	status: z.string().trim().max(80).default("new"),
+	source: z.string().trim().max(120).optional(),
+	note: z.string().trim().max(2000).default(""),
+	fields: z.record(z.string(), z.string()).default({}),
+});
+export const createAppointmentInput = z.object({
+	shopId: z.string().min(1),
+	title: z.string().trim().min(1).max(160),
+	customerId: z.string().max(120).optional(),
+	contactName: z.string().trim().max(160).optional(),
+	phone: z.string().trim().max(60).optional(),
+	startAt: z.iso.datetime({ offset: true }),
+	endAt: z.iso.datetime({ offset: true }).optional(),
+	status: z.string().trim().max(80).default("scheduled"),
+	assigneeId: z.string().max(120).optional(),
+	source: z.string().trim().max(120).optional(),
+	location: z.string().trim().max(240).optional(),
+	note: z.string().trim().max(2000).default(""),
+});
+export const createTicketInput = z.object({
+	shopId: z.string().min(1),
+	title: z.string().trim().min(1).max(160),
+	customerId: z.string().max(120).optional(),
+	contactName: z.string().trim().max(160).optional(),
+	phone: z.string().trim().max(60).optional(),
+	email: z.string().trim().max(160).optional(),
+	orderId: z.string().max(120).optional(),
+	category: z.string().trim().max(120).optional(),
+	priority: z.string().trim().max(80).default("low"),
+	status: z.string().trim().max(80).default("new"),
+	assigneeId: z.string().max(120).optional(),
+	dueAt: z.iso.datetime({ offset: true }).optional(),
+	source: z.string().trim().max(120).optional(),
+	description: z.string().trim().max(2000).default(""),
+});
+export const createNoteInput = z.object({
+	shopId: z.string().min(1),
+	customerId: z.string().min(1),
+	content: z.string().trim().min(1).max(4000),
+});
 
 export function sourceDate(value: string): Date {
 	return new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);

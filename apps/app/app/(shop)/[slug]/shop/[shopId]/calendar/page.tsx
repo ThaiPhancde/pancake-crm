@@ -1,9 +1,11 @@
 import Calendar from "@carbon/icons-react/es/Calendar";
 import DataTable from "@carbon/icons-react/es/DataTable";
+import { Badge } from "@crm/ui/components/badge";
 import { Icon } from "@crm/ui/components/icon";
 import { Input } from "@crm/ui/components/input";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
+import { formatDate } from "@/components/pancake/format";
 import {
 	CalendarGrid,
 	CalendarNav,
@@ -20,7 +22,7 @@ import {
 	MoreMenu,
 	ViewSwitch,
 } from "@/components/shop/filter-bar";
-import { ListFooter, ListTable } from "@/components/shop/list-table";
+import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { ShopPage, ShopPageBody, ShopPageHeader } from "@/components/shop/page";
 import { type SearchValues, text, withParams } from "@/components/shop/params";
@@ -46,11 +48,23 @@ async function Appointments({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
-	const sellers = await ctx.api.sellers.query({ shopId: ctx.shopId });
+	const pageNum = Math.max(1, Number(text(values, "page") || "1"));
+	const [sellers, appointments] = await Promise.all([
+		ctx.api.sellers.query({ shopId: ctx.shopId }),
+		ctx.api.appointments.query({
+			shopId: ctx.shopId,
+			q: text(values, "q"),
+			status: text(values, "status") || undefined,
+			assigneeId: text(values, "assignee") || undefined,
+			page: pageNum,
+			pageSize: 25,
+		}),
+	]);
 	const staff = sellers.map((seller) => ({
 		value: seller.employeeId,
 		label: seller.name,
 	}));
+	const sellerMap = new Map(sellers.map((s) => [s.employeeId, s.name]));
 	const collection = COLLECTIONS.appointment;
 	const view = text(values, "view") === "table" ? "table" : "calendar";
 	const rawMode = text(values, "mode");
@@ -160,13 +174,38 @@ async function Appointments({
 					<CalendarGrid date={date} mode={mode} today={today} />
 				) : (
 					<>
-						<ListTable columns={columns} rows={[]} />
+						<ListTable
+							columns={columns}
+							rows={appointments.rows.map((item) => {
+								const statusOpt = APPOINTMENT_STATUSES.find(
+									(s) => s.value === item.status,
+								);
+								return {
+									key: item.id,
+									cells: [
+										item.title,
+										item.contactName ?? <Dash />,
+										item.phone ?? <Dash />,
+										formatDate(item.startAt),
+										item.endAt ? formatDate(item.endAt) : <Dash />,
+										<Badge key="status" variant="blue">
+											{statusOpt?.label ?? item.status}
+										</Badge>,
+										item.assigneeId
+											? (sellerMap.get(item.assigneeId) ?? item.assigneeId)
+											: <Dash />,
+									],
+								};
+							})}
+						/>
 						<ListFooter
-							total={0}
-							page={1}
+							total={appointments.total}
+							page={pageNum}
 							pageSize={25}
 							unit="lịch hẹn"
-							pageHref={() => page}
+							pageHref={(next) =>
+								withParams(page, values, { page: String(next) })
+							}
 						/>
 					</>
 				)}

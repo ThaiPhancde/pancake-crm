@@ -1,22 +1,32 @@
+import Phone from "@carbon/icons-react/es/Phone";
 import SettingsAdjust from "@carbon/icons-react/es/SettingsAdjust";
+import { Avatar, AvatarFallback, AvatarImage } from "@crm/ui/components/avatar";
 import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
 import { Icon } from "@crm/ui/components/icon";
+import Link from "next/link";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
+import { formatAmount } from "@/components/pancake/format";
 import {
 	COLLECTIONS,
 	CONTACT_STATUSES,
 	SOURCE_OPTIONS,
 } from "@/components/shop/collections";
 import {
+	CustomerDetailDrawer,
+	CustomerDetailFullView,
+} from "@/components/shop/customer-detail-view";
+import {
 	FilterBar,
 	FilterButton,
 	FilterChip,
 	MoreMenu,
+	QuickViewChip,
 	RangeChip,
 	SearchBox,
 	SortButton,
+	StatsToggle,
 } from "@/components/shop/filter-bar";
 import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
@@ -24,9 +34,11 @@ import { ShopPage, ShopPageBody, ShopPageHeader } from "@/components/shop/page";
 import {
 	type SearchValues,
 	shopFilters,
+	text,
 	withParams,
 } from "@/components/shop/params";
 import { CreateRecordButton } from "@/components/shop/record-sheet";
+import { initials } from "@/lib/initials";
 
 export default function ContactsPage(props: {
 	params: Promise<ShopRoute>;
@@ -48,9 +60,34 @@ async function Contacts({
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const filter = shopFilters(values, ctx.shopId);
-	const [customers, sellers] = await Promise.all([
+	const selectedCustomerId = text(values, "customerId");
+	const fullView = text(values, "full") === "1";
+	const statsShown = text(values, "stats") !== "0";
+	const page = `${ctx.base}/contacts`;
+
+	if (selectedCustomerId && fullView) {
+		const detail = await ctx.api.customerDetail
+			.query({ shopId: ctx.shopId, customerId: selectedCustomerId })
+			.catch(() => null);
+		if (detail) {
+			return (
+				<CustomerDetailFullView
+					detail={detail}
+					backHref={withParams(page, values, { customerId: "", full: "" })}
+					base={ctx.base}
+				/>
+			);
+		}
+	}
+
+	const [customers, sellers, activeDetail] = await Promise.all([
 		ctx.api.customers.query(filter.input),
 		ctx.api.sellers.query({ shopId: ctx.shopId }),
+		selectedCustomerId
+			? ctx.api.customerDetail
+					.query({ shopId: ctx.shopId, customerId: selectedCustomerId })
+					.catch(() => null)
+			: Promise.resolve(null),
 	]);
 	const staff = sellers.map((seller) => ({
 		value: seller.employeeId,
@@ -60,7 +97,6 @@ async function Contacts({
 	const columns = collection.fields
 		.filter((field) => field.list)
 		.map((field) => ({ key: field.key, label: field.label }));
-	const page = `${ctx.base}/contacts`;
 
 	return (
 		<ShopPage>
@@ -69,9 +105,11 @@ async function Contacts({
 				description={collection.description}
 				actions={
 					<>
-						<Button variant="outline">
-							<Icon icon={SettingsAdjust} data-icon="inline-start" />
-							Tùy chỉnh
+						<Button asChild variant="outline">
+							<Link href={`${ctx.base}/settings/tools/fields/contact`}>
+								<Icon icon={SettingsAdjust} data-icon="inline-start" />
+								Giao diện
+							</Link>
 						</Button>
 						<CreateRecordButton collection="contact" users={staff} />
 					</>
@@ -89,24 +127,31 @@ async function Contacts({
 								fields={columns.map((c) => ({ value: c.key, label: c.label }))}
 							/>
 							<FilterButton
-								fields={collection.fields.map((f) => ({
-									value: f.key,
-									label: f.label,
-								}))}
+								fields={collection.fields
+									.filter((f) => !f.hidden)
+									.map((f) => ({
+										value: f.key,
+										label: f.label,
+									}))}
 							/>
+							<StatsToggle />
 							<MoreMenu />
 						</>
 					}
 				>
+					<QuickViewChip
+						options={[
+							{ value: "all", label: "Mặc định" },
+							{ value: "new", label: "Liên hệ mới" },
+							{ value: "repeat", label: "Khách mua lại" },
+						]}
+						savedFilters="⚙ Bộ lọc đã lưu (0/10)"
+					/>
 					<FilterChip
 						label="Phân công"
-						param="assignee"
-						multiple
+						param="sellerId"
 						searchable
-						options={[
-							{ value: "none", label: "Chưa được phân công" },
-							...staff,
-						]}
+						options={[{ value: "all", label: "Tất cả nhân viên" }, ...staff]}
 					/>
 					<FilterChip
 						label="Trạng thái"
@@ -129,31 +174,121 @@ async function Contacts({
 						options={SOURCE_OPTIONS}
 					/>
 				</FilterBar>
+
+				{statsShown ? (
+					<div className="grid gap-3 md:grid-cols-3">
+						<div className="flex flex-col justify-between gap-2 rounded-lg border bg-card p-4">
+							<span className="font-semibold text-xs">Số liên hệ mới</span>
+							<div className="flex items-baseline justify-between">
+								<span className="font-bold text-2xl tabular-nums">
+									{customers.summary.newContacts.toLocaleString("en-US")}
+								</span>
+								<Badge variant="green" className="text-[11px]">
+									↑ 100%
+								</Badge>
+							</div>
+							<span className="text-muted-foreground text-[11px]">
+								Đồng bộ từ Pancake POS
+							</span>
+						</div>
+						<div className="flex flex-col justify-between gap-2 rounded-lg border bg-card p-4">
+							<span className="font-semibold text-xs">Tổng số tiền đã chi</span>
+							<div className="flex items-baseline justify-between">
+								<span className="font-bold text-2xl tabular-nums">
+									{formatAmount(
+										customers.summary.totalSpent,
+										customers.summary.currency,
+									)}
+								</span>
+								<Badge variant="green" className="text-[11px]">
+									↑ 100%
+								</Badge>
+							</div>
+							<span className="text-muted-foreground text-[11px]">
+								Tính trên các đơn đã nhận / thu tiền
+							</span>
+						</div>
+						<div className="flex flex-col justify-between gap-2 rounded-lg border bg-card p-4">
+							<span className="font-semibold text-xs">Tỷ lệ quay lại</span>
+							<div className="flex items-baseline justify-between">
+								<span className="font-bold text-2xl tabular-nums">
+									{customers.summary.returningRate}%
+								</span>
+							</div>
+							<span className="text-muted-foreground text-[11px]">
+								Khách hàng có từ 2 đơn hàng trở lên
+							</span>
+						</div>
+					</div>
+				) : null}
+
 				<ListTable
 					columns={columns}
-					rows={customers.rows.map((customer) => ({
-						key: customer.customerId,
-						href: withParams(
-							`${ctx.base}/orders`,
-							{},
-							{ customerId: customer.customerId },
-						),
-						cells: [
-							customer.name,
-							customer.phone ?? <Dash />,
-							customer.email ?? <Dash />,
-							customer.assignedEmployeeName ?? <Dash />,
-							<Dash key="tags" />,
-							<Dash key="birthday" />,
-							<Badge key="pancake" variant="soft-blue">
-								#{customer.customerId}
-							</Badge>,
-							<Dash key="source" />,
-							<Badge key="status" variant="blue">
-								Mới
-							</Badge>,
-						],
-					}))}
+					rows={customers.rows.map((customer) => {
+						const statusBadge =
+							customer.orderCount > 1
+								? { label: "Khách mua lại", variant: "green" as const }
+								: customer.orderCount === 1
+									? { label: "Đang mua", variant: "blue" as const }
+									: { label: "Mới", variant: "blue" as const };
+						return {
+							key: customer.customerId,
+							href: withParams(page, values, {
+								customerId: customer.customerId,
+								full: "",
+							}),
+							cells: [
+								customer.name,
+								customer.phone ? (
+									<span
+										key="phone"
+										className="inline-flex items-center gap-1.5 font-medium"
+									>
+										<span>{customer.phone}</span>
+										<Icon icon={Phone} className="size-3.5 text-[#1677ff]" />
+									</span>
+								) : (
+									<Dash key="phone-none" />
+								),
+								customer.email ? (
+									<span key="email">{customer.email}</span>
+								) : (
+									<Dash key="email-none" />
+								),
+								customer.source ? (
+									<span key="source">{customer.source}</span>
+								) : (
+									<Dash key="source-none" />
+								),
+								customer.assignedEmployeeName ? (
+									<span
+										key="assignee"
+										className="inline-flex items-center gap-2 rounded-full border bg-muted/30 px-2.5 py-0.5"
+									>
+										<Avatar size="xs">
+											{customer.assignedEmployeeAvatarUrl ? (
+												<AvatarImage
+													src={customer.assignedEmployeeAvatarUrl}
+													alt={customer.assignedEmployeeName}
+												/>
+											) : null}
+											<AvatarFallback>
+												{initials(customer.assignedEmployeeName)}
+											</AvatarFallback>
+										</Avatar>
+										<span className="truncate">
+											{customer.assignedEmployeeName}
+										</span>
+									</span>
+								) : (
+									<Dash key="assignee-none" />
+								),
+								<Badge key="status" variant={statusBadge.variant}>
+									{statusBadge.label}
+								</Badge>,
+							],
+						};
+					})}
 				/>
 				<ListFooter
 					total={customers.total}
@@ -162,6 +297,18 @@ async function Contacts({
 					unit="liên hệ"
 					pageHref={(next) => withParams(page, values, { page: String(next) })}
 				/>
+
+				{activeDetail ? (
+					<CustomerDetailDrawer
+						detail={activeDetail}
+						closeHref={withParams(page, values, { customerId: "", full: "" })}
+						fullHref={withParams(page, values, {
+							customerId: activeDetail.customerId,
+							full: "1",
+						})}
+						base={ctx.base}
+					/>
+				) : null}
 			</ShopPageBody>
 		</ShopPage>
 	);

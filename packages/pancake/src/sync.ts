@@ -77,7 +77,11 @@ export async function syncResource(
 	let pages = 0;
 	let records = 0;
 	const coveredUntil = cursor.windowEnd ?? now;
-	while (pages < budget) {
+	const limit =
+		cursor.phase === "history" && budget === PANCAKE.pageBudget
+			? PANCAKE.historyPageBudget
+			: budget;
+	while (pages < limit) {
 		const end = cursor.windowEnd;
 		if (!end) throw new PancakeApiError("CURSOR_WINDOW_REQUIRED");
 		const fetchedAt = new Date();
@@ -133,6 +137,47 @@ export async function syncResource(
 		if (complete) return { pages, records, complete: true, coveredUntil };
 	}
 	return { pages, records, complete: false, coveredUntil };
+}
+
+export async function syncRecent(
+	db: Db,
+	shopId: string,
+	resource: Resource,
+	reader: PancakeReader,
+	now = new Date(),
+): Promise<{ pages: number; records: number }> {
+	const cursor = await db.pancakeSyncCursor.findUnique({
+		where: { shopId_resource: { shopId, resource } },
+		select: { phase: true },
+	});
+	if (cursor && cursor.phase === "incremental") return { pages: 0, records: 0 };
+	const start = new Date(now.getTime() - PANCAKE.recentWindowMs);
+	let pages = 0;
+	let records = 0;
+	for (let number = 1; number <= PANCAKE.recentPageBudget; number++) {
+		const fetchedAt = new Date();
+		const page = await reader.readPage({
+			resource,
+			page: number,
+			start,
+			end: now,
+		});
+		const written = await db.$transaction(
+			async (tx) => {
+				let count = 0;
+				for (const item of page.data) {
+					if (item === null) throw new PancakeApiError("INVALID_RECORD");
+					if (await storeRecord(tx, shopId, resource, item, fetchedAt)) count++;
+				}
+				return count;
+			},
+			{ timeout: PANCAKE.transactionMs },
+		);
+		pages++;
+		records += written;
+		if (page.data.length === 0 || pageComplete(page, number, resource)) break;
+	}
+	return { pages, records };
 }
 
 export async function syncShop(
@@ -203,6 +248,11 @@ export async function syncShop(
 				pages += outcome.pages;
 				records += outcome.records;
 				allComplete &&= outcome.complete;
+				if (!outcome.complete && !readerOverride) {
+					const recent = await syncRecent(db, shop.id, resource, reader);
+					pages += recent.pages;
+					records += recent.records;
+				}
 				if (outcome.complete && jobs.length)
 					await db.pancakeWebhookJob.updateMany({
 						where: {

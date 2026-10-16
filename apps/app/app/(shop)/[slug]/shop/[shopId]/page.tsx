@@ -19,8 +19,9 @@ import {
 } from "@/components/shop/params";
 import { formatRange } from "@/components/shop/range";
 import { RangeToggle, RefreshButton } from "@/components/shop/range-picker";
-import { ReportCard } from "@/components/shop/report";
+import { HorizontalBars, ReportCard } from "@/components/shop/report";
 import { shopProfile } from "@/components/shop/shop-profile";
+import { ShopTrendChart } from "@/components/shop/shop-trend-chart";
 
 export default function HomePage(props: {
 	params: Promise<ShopRoute>;
@@ -84,14 +85,53 @@ async function Home({
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const filter = shopFilters(values, ctx.shopId, "30d");
-	const view = text(values, "view") === "personal" ? "personal" : "manager";
-	const taskView = text(values, "tasks") === "overdue" ? "overdue" : "open";
-	const [overview, report, customers, tasks] = await Promise.all([
-		ctx.api.overview.query(filter.input),
-		ctx.api.report.query(filter.input),
-		ctx.api.customers.query({ ...filter.input, pageSize: 1 }),
-		ctx.api.tasks.query({ ...filter.input, taskView, pageSize: 8 }),
-	]);
+	const view =
+		text(values, "scope") === "personal" || text(values, "view") === "personal"
+			? "personal"
+			: "manager";
+	const taskTab = text(values, "tasks") === "overdue" ? "overdue" : "open";
+	const sellers = await ctx.api.sellers.query({ shopId: ctx.shopId });
+	const userEmail = ctx.session.user.email.toLowerCase();
+	const userName = ctx.session.user.name.trim().toLowerCase();
+	const personalEmployee =
+		sellers.find((s) => s.email?.toLowerCase() === userEmail) ??
+		sellers.find((s) => s.name.trim().toLowerCase() === userName) ??
+		null;
+	const scopedInput =
+		view === "personal"
+			? {
+					...filter.input,
+					sellerId: personalEmployee?.employeeId ?? "__personal_none__",
+				}
+			: filter.input;
+	const [overview, report, customers, tasks, leads, tickets] =
+		await Promise.all([
+			ctx.api.overview.query(scopedInput),
+			ctx.api.report.query(scopedInput),
+			ctx.api.customers.query({ ...scopedInput, pageSize: 1 }),
+			ctx.api.tasks.query({
+				...filter.input,
+				taskView:
+					view === "personal" && taskTab === "open" ? "mine" : taskTab,
+				pageSize: 8,
+			}),
+			ctx.api.leads.query({
+				shopId: ctx.shopId,
+				assigneeId:
+					view === "personal"
+						? (personalEmployee?.employeeId ?? "__personal_none__")
+						: undefined,
+				pageSize: 1,
+			}),
+			ctx.api.tickets.query({
+				shopId: ctx.shopId,
+				assigneeId:
+					view === "personal"
+						? (personalEmployee?.employeeId ?? "__personal_none__")
+						: undefined,
+				pageSize: 1,
+			}),
+		]);
 	const currency =
 		report.revenue[0]?.currency ?? shopProfile(ctx.shopId).currency;
 	const revenue = report.revenue.reduce(
@@ -106,6 +146,9 @@ async function Home({
 	const name = ctx.session.user.name.split(" ").slice(-2).join(" ");
 	const periodLabel =
 		filter.from && filter.to ? formatRange(filter.from, filter.to) : "";
+	const topPerformers = [...report.performance]
+		.sort((a, b) => Number(b.revenue) - Number(a.revenue))
+		.slice(0, 5);
 
 	return (
 		<div className="flex min-h-full flex-col gap-3">
@@ -113,7 +156,9 @@ async function Home({
 				<div>
 					<h1 className="text-lg font-semibold tracking-tight">Tổng quan</h1>
 					<p className="text-muted-foreground text-xs">
-						Tổng quan nhanh số liệu và hoạt động trong CRM
+						{view === "personal"
+							? `Hiệu suất cá nhân${personalEmployee ? ` · ${personalEmployee.name}` : " (Tài khoản chưa gán nhân viên bán hàng trên Pancake POS)"}`
+							: "Tổng quan nhanh số liệu và hoạt động toàn shop trong CRM"}
 					</p>
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
@@ -154,10 +199,30 @@ async function Home({
 							</ReportCard>
 						</div>
 						<ReportCard title="Báo cáo doanh thu">
-							<div className="font-semibold text-lg tabular-nums">
-								{formatAmount(String(revenue), currency)}
+							<div className="flex items-baseline justify-between">
+								<div className="font-semibold text-lg tabular-nums">
+									{formatAmount(String(revenue), currency)}
+								</div>
+								<span className="text-muted-foreground text-xs">
+									{report.delivered} đơn thành công / {report.orders} tổng đơn
+								</span>
 							</div>
-							<EmptyChart label="Chưa có chuỗi doanh thu theo ngày. Số tổng ở trên lấy từ đơn đã nhận / thu tiền." />
+							{report.dailySeries.length > 0 ? (
+								<ShopTrendChart
+									height={220}
+									data={report.dailySeries}
+									xKey="date"
+									currency={currency}
+									config={{
+										revenue: {
+											label: `Doanh thu (${currency})`,
+											color: "var(--chart-1)",
+										},
+									}}
+								/>
+							) : (
+								<EmptyChart label="Không có đơn hàng phát sinh trong khoảng thời gian đã chọn." />
+							)}
 							{periodLabel ? (
 								<div className="flex justify-center gap-6 text-muted-foreground text-xs">
 									<span>— {periodLabel}</span>
@@ -211,11 +276,23 @@ async function Home({
 								<EmptyChart />
 							)}
 						</ReportCard>
-						<ReportCard title="Doanh thu theo nguồn">
-							<EmptyChart />
+						<ReportCard title="Doanh thu theo nhân viên">
+							<HorizontalBars
+								items={topPerformers.map((row) => ({
+									label: row.sellerName,
+									value: Number(row.revenue),
+									display: formatAmount(row.revenue, row.currency),
+								}))}
+							/>
 						</ReportCard>
-						<ReportCard title="Tổng số liên hệ theo nguồn">
-							<EmptyChart />
+						<ReportCard title="Số đơn theo nhân viên">
+							<HorizontalBars
+								items={topPerformers.map((row) => ({
+									label: row.sellerName,
+									value: row.orders,
+									display: `${row.orders} đơn (${row.deliveredRate})`,
+								}))}
+							/>
 						</ReportCard>
 					</div>
 				</div>
@@ -233,7 +310,7 @@ async function Home({
 									</Badge>
 									<Badge variant="blue" className="h-7 px-3 text-xs">
 										<span className="mr-1 rounded-full bg-white px-1.5 text-[#1677ff]">
-											0
+											{tickets.total}
 										</span>
 										Ticket đang chờ
 									</Badge>
@@ -241,10 +318,10 @@ async function Home({
 							</Greeting>
 							<div className="grid gap-3 sm:grid-cols-2">
 								{[
-									{ label: "Tiềm năng mới", value: 0 },
+									{ label: "Tiềm năng mới", value: leads.total },
 									{ label: "Liên hệ mới", value: customers.total },
 									{
-										label: "Doanh thu",
+										label: "Doanh thu cá nhân",
 										value: formatAmount(String(revenue), currency),
 									},
 									{ label: "Tỷ lệ chuyển đổi", value: `${rate}%` },
@@ -264,7 +341,7 @@ async function Home({
 							</div>
 						</div>
 						<ReportCard
-							title="Danh sách nhiệm vụ"
+							title="Danh sách nhiệm vụ cá nhân"
 							action={
 								<Link
 									href={`${ctx.base}/reports/tasks`}
@@ -282,7 +359,7 @@ async function Home({
 											tasks: key === "open" ? "" : key,
 										})}
 										className={
-											taskView === key
+											taskTab === key
 												? "-mb-px flex items-center gap-1.5 border-primary border-b-2 pb-2 text-primary"
 												: "flex items-center gap-1.5 pb-2 text-muted-foreground"
 										}

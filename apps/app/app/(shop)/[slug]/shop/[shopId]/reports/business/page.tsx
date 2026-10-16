@@ -1,4 +1,5 @@
 import Download from "@carbon/icons-react/es/Download";
+import { Avatar, AvatarFallback, AvatarImage } from "@crm/ui/components/avatar";
 import { Button } from "@crm/ui/components/button";
 import { Icon } from "@crm/ui/components/icon";
 import { Suspense } from "react";
@@ -12,6 +13,8 @@ import { type SearchValues, shopFilters } from "@/components/shop/params";
 import { formatRange } from "@/components/shop/range";
 import { MetricRow, ReportCard, ReportPage } from "@/components/shop/report";
 import { shopProfile } from "@/components/shop/shop-profile";
+import { ShopTrendChart } from "@/components/shop/shop-trend-chart";
+import { initials } from "@/lib/initials";
 
 export default function BusinessReportPage(props: {
 	params: Promise<ShopRoute>;
@@ -59,20 +62,36 @@ async function Business({
 						{ label: "Doanh thu", value: money(revenue) },
 						{ label: "Số đơn chốt", value: closed },
 						{ label: "Giá trị trung bình đơn", value: money(average) },
-						{ label: "Lợi nhuận", value: "—" },
-						{ label: "Lợi nhuận TB", value: "—" },
-						{ label: "SL Sản phẩm", value: "—" },
+						{ label: "Đơn thành công", value: report.delivered },
+						{ label: "Đơn hoàn", value: report.returned },
+						{ label: "Đơn đã hủy", value: report.cancelled },
 					]}
 				/>
 			</ReportCard>
 			<ReportCard
+				title="Biểu đồ doanh thu theo ngày"
 				action={
 					<Button variant="outline" size="sm">
 						Ngày ▾
 					</Button>
 				}
 			>
-				<EmptyChart label="Chưa có chuỗi doanh thu theo ngày." />
+				{report.dailySeries.length > 0 ? (
+					<ShopTrendChart
+						height={220}
+						data={report.dailySeries}
+						xKey="date"
+						currency={currency}
+						config={{
+							revenue: {
+								label: `Doanh thu (${currency})`,
+								color: "var(--chart-1)",
+							},
+						}}
+					/>
+				) : (
+					<EmptyChart label="Không có dữ liệu doanh thu trong khoảng thời gian này." />
+				)}
 				{filter.from && filter.to ? (
 					<p className="text-center text-muted-foreground text-xs">
 						— {formatRange(filter.from, filter.to)}
@@ -80,7 +99,7 @@ async function Business({
 				) : null}
 			</ReportCard>
 			<ReportCard
-				title="Thống kê đơn hàng"
+				title="Thống kê đơn hàng theo nhân viên"
 				action={
 					<div className="flex items-center gap-2">
 						<Button variant="outline" size="sm" disabled>
@@ -103,20 +122,31 @@ async function Business({
 						{ key: "created", label: "SL Đơn tạo mới" },
 						{ key: "closed", label: "SL Đơn chốt" },
 						{ key: "delivered", label: "SL Đơn Thành công" },
-						{ key: "new", label: "SL đơn từ khách hàng mới" },
-						{ key: "old", label: "SL đơn từ khách cũ" },
+						{ key: "returned", label: "SL Đơn hoàn" },
+						{ key: "cancelled", label: "SL Đơn hủy" },
 						{ key: "rate", label: "Tỷ lệ chốt" },
 						{ key: "revenue", label: "Doanh thu" },
 					]}
 					rows={report.performance.map((row) => ({
 						key: `${row.sellerId}:${row.currency}`,
 						cells: [
-							row.sellerName,
+							<span key="seller" className="flex items-center gap-2">
+								<Avatar size="xs">
+									{row.sellerAvatarUrl ? (
+										<AvatarImage
+											src={row.sellerAvatarUrl}
+											alt={row.sellerName}
+										/>
+									) : null}
+									<AvatarFallback>{initials(row.sellerName)}</AvatarFallback>
+								</Avatar>
+								<span className="font-medium">{row.sellerName}</span>
+							</span>,
 							row.orders,
 							row.orders - row.cancelled,
 							row.delivered,
-							"—",
-							"—",
+							row.returned,
+							row.cancelled,
 							row.deliveredRate,
 							formatAmount(row.revenue, row.currency),
 						],

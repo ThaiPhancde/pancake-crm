@@ -29,6 +29,14 @@ export function parseFilters(values: SearchValues) {
 		(!to || z.iso.date().safeParse(to).success);
 	const end = datesValid && to ? new Date(`${to}T00:00:00+07:00`) : undefined;
 	if (end) end.setTime(end.getTime() + 86_400_000);
+	const safeView = z
+		.enum(["all", "pending", "shipping", "returns", "unassigned"])
+		.catch("all")
+		.parse(text("view"));
+	const safeSort = z
+		.enum(["newest", "updated", "oldest"])
+		.catch("newest")
+		.parse(text("sort"));
 	const parsed = listInput.safeParse({
 		shopId:
 			text("shopId") && text("shopId") !== "all" ? text("shopId") : undefined,
@@ -48,8 +56,8 @@ export function parseFilters(values: SearchValues) {
 		to: end?.toISOString(),
 		page: text("page") ? Number(text("page")) : 1,
 		pageSize: 25,
-		view: text("view") || "all",
-		sort: text("sort") || "newest",
+		view: safeView,
+		sort: safeSort,
 	});
 	const valid = datesValid && parsed.success;
 	const input = valid ? parsed.data : listInput.parse({});

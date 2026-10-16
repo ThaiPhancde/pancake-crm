@@ -84,6 +84,10 @@ model PancakeShop {
   cursors           PancakeSyncCursor[]
   webhooks          PancakeWebhookJob[]
   runs              PancakeSyncRun[]
+  leads             PancakeLead[]
+  appointments      PancakeAppointment[]
+  tickets           PancakeTicket[]
+  notes             PancakeNote[]
 
   @@map("pancakeShop")
 }
@@ -301,6 +305,90 @@ model PancakeSyncRun {
 
   @@index([shopId, startedAt])
   @@map("pancakeSyncRun")
+}
+
+model PancakeLead {
+  id          String      @id @default(cuid())
+  shopId      String
+  name        String
+  phone       String?
+  email       String?
+  assigneeId  String?
+  status      String      @default("new")
+  source      String?
+  note        String      @default("")
+  fields      Json        @default("{}")
+  createdById String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  shop        PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, status, createdAt])
+  @@map("pancakeLead")
+}
+
+model PancakeAppointment {
+  id          String      @id @default(cuid())
+  shopId      String
+  title       String
+  customerId  String?
+  contactName String?
+  phone       String?
+  startAt     DateTime
+  endAt       DateTime?
+  status      String      @default("scheduled")
+  assigneeId  String?
+  source      String?
+  location    String?
+  note        String      @default("")
+  createdById String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  shop        PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, startAt])
+  @@index([shopId, customerId])
+  @@map("pancakeAppointment")
+}
+
+model PancakeTicket {
+  id          String      @id @default(cuid())
+  shopId      String
+  title       String
+  customerId  String?
+  contactName String?
+  phone       String?
+  email       String?
+  orderId     String?
+  category    String?
+  priority    String      @default("low")
+  status      String      @default("new")
+  assigneeId  String?
+  dueAt       DateTime?
+  source      String?
+  description String      @default("")
+  createdById String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  shop        PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, status, createdAt])
+  @@index([shopId, customerId])
+  @@map("pancakeTicket")
+}
+
+model PancakeNote {
+  id          String      @id @default(cuid())
+  shopId      String
+  customerId  String
+  content     String
+  createdById String
+  authorName  String
+  createdAt   DateTime    @default(now())
+  shop        PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, customerId, createdAt])
+  @@map("pancakeNote")
 }
 
 model SlackMemberMatch {

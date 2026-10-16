@@ -122,6 +122,14 @@ bun run windows:deploy
 The starter runs the web app, API, and Pancake sync worker.
 The web app uses port 3100. The API uses port 3101.
 Logs are stored in `.logs/`.
+Register automatic startup and process recovery for the current Windows account:
+
+```powershell
+.\scripts\windows\Register-CrmStartup.ps1
+```
+
+The task checks processes every minute and starts missing CRM processes.
+`Stop-Crm.ps1` pauses recovery. Run `Start-Crm.ps1 -Production` to resume it.
 
 ```powershell
 .\scripts\windows\Stop-Crm.ps1

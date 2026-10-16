@@ -128,7 +128,7 @@ function ShopSwitcher({
 				<DropdownMenuItem asChild>
 					<Link href={`/${slug}`} className="gap-2 font-medium">
 						<Icon icon={Dashboard} />
-						Bảng điều khiển
+						Bảng điều khiển tổng (/crm)
 					</Link>
 				</DropdownMenuItem>
 			</DropdownMenuContent>
@@ -239,7 +239,15 @@ function SidebarNav({
 	onNavigate?: () => void;
 	onExpand?: () => void;
 }) {
-	const [open, setOpen] = useState<Record<string, boolean>>({});
+	const activeGroup =
+		SHOP_NAV.find((item) => item.children && isActive(item, base, pathname))
+			?.href ?? null;
+	const [openKey, setOpenKey] = useState<string | null>(activeGroup);
+	const [prevPath, setPrevPath] = useState(pathname);
+	if (prevPath !== pathname) {
+		setPrevPath(pathname);
+		if (activeGroup) setOpenKey(activeGroup);
+	}
 	return (
 		<nav
 			aria-label="Workspace"
@@ -253,15 +261,14 @@ function SidebarNav({
 					pathname={pathname}
 					collapsed={collapsed}
 					onNavigate={onNavigate}
-					open={open[item.href] ?? isActive(item, base, pathname)}
+					open={openKey === item.href}
 					onToggle={() => {
-						if (collapsed) onExpand?.();
-						setOpen((state) => ({
-							...state,
-							[item.href]:
-								collapsed ||
-								!(state[item.href] ?? isActive(item, base, pathname)),
-						}));
+						if (collapsed) {
+							onExpand?.();
+							setOpenKey(item.href);
+							return;
+						}
+						setOpenKey((current) => (current === item.href ? null : item.href));
 					}}
 				/>
 			))}

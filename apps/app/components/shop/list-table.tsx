@@ -13,6 +13,7 @@ import {
 } from "@crm/ui/components/table";
 import { cn } from "@crm/ui/lib/utils";
 import Link from "next/link";
+import { ClickableRow } from "./clickable-row";
 import { EmptyRows } from "./empty-state";
 import { ShopPageFooter } from "./page";
 
@@ -54,7 +55,11 @@ export function ListTable({
 				</TableHeader>
 				<TableBody>
 					{rows.map((row) => (
-						<TableRow key={row.key} className="hover:bg-accent/40">
+						<ClickableRow
+							key={row.key}
+							href={row.href}
+							className="hover:bg-accent/40"
+						>
 							{selectable ? (
 								<TableCell className="pl-4">
 									<Checkbox aria-label="Chọn dòng" />
@@ -68,7 +73,8 @@ export function ListTable({
 									{index === 0 && row.href ? (
 										<Link
 											href={row.href}
-											className="font-medium text-primary hover:underline"
+											scroll={false}
+											className="font-medium text-foreground hover:text-primary"
 										>
 											{cell}
 										</Link>
@@ -77,7 +83,7 @@ export function ListTable({
 									)}
 								</TableCell>
 							))}
-						</TableRow>
+						</ClickableRow>
 					))}
 					{rows.length === 0 ? (
 						<TableRow className="hover:bg-transparent">

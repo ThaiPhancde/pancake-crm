@@ -30,6 +30,7 @@ import {
 import { Switch } from "@crm/ui/components/switch";
 import { Textarea } from "@crm/ui/components/textarea";
 import { cn } from "@crm/ui/lib/utils";
+import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { NotConnectedError, submitRecord } from "./actions";
@@ -214,22 +215,28 @@ export function RecordForm({
 	twoColumns?: boolean;
 }) {
 	const definition = COLLECTIONS[collection];
+	const params = useParams<{ shopId?: string }>();
+	const router = useRouter();
 	const [pending, setPending] = useState(false);
-	const fields = definition.fields.filter((field) => field.type !== "formula");
+	const fields = definition.fields.filter(
+		(field) => field.type !== "formula" && !field.hidden,
+	);
 	async function submit(form: HTMLFormElement, reset: boolean) {
 		setPending(true);
 		try {
 			await submitRecord(
 				collection,
 				Object.fromEntries(new FormData(form).entries()),
+				params?.shopId,
 			);
 			toast.success(`Đã lưu ${definition.title.toLowerCase()}.`);
+			router.refresh();
 			if (reset) form.reset();
 			else onDone?.();
 		} catch (error) {
 			toast.error(
 				error instanceof NotConnectedError
-					? `Biểu mẫu ${definition.title.toLowerCase()} chưa nối API. Dữ liệu chưa được lưu.`
+					? `Biểu mẫu ${definition.title.toLowerCase()} đồng bộ một chiều từ Pancake POS.`
 					: "Không lưu được. Thử lại sau.",
 			);
 		} finally {

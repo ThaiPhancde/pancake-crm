@@ -150,3 +150,36 @@ export function Breakdown({
 		</div>
 	);
 }
+
+export function HorizontalBars({
+	items,
+}: {
+	items: { label: string; value: number; display: string }[];
+}) {
+	if (items.length === 0) {
+		return <EmptyChart />;
+	}
+	const max = Math.max(1, ...items.map((i) => i.value));
+	return (
+		<div className="flex flex-col gap-3">
+			{items.map((item) => (
+				<div key={item.label} className="space-y-1 text-xs">
+					<div className="flex items-center justify-between gap-2">
+						<span className="truncate font-medium">{item.label}</span>
+						<span className="shrink-0 text-muted-foreground tabular-nums">
+							{item.display}
+						</span>
+					</div>
+					<div className="h-2 overflow-hidden rounded-full bg-muted">
+						<div
+							className="h-full rounded-full bg-primary"
+							style={{
+								width: `${Math.max(4, Math.round((100 * item.value) / max))}%`,
+							}}
+						/>
+					</div>
+				</div>
+			))}
+		</div>
+	);
+}

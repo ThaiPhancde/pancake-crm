@@ -34,6 +34,7 @@ export type FieldDef = {
 	type: FieldType;
 	required?: boolean;
 	locked?: boolean;
+	hidden?: boolean;
 	placeholder?: string;
 	options?: FieldOption[];
 	relation?: "contact" | "customer" | "product" | "order" | "lead" | "ticket";
@@ -250,6 +251,7 @@ export const COLLECTIONS = {
 				INFO_LEAD,
 				{
 					relation: "customer",
+					hidden: true,
 				},
 			),
 			field(
@@ -285,6 +287,17 @@ export const COLLECTIONS = {
 			"Khách hàng đã xác định, đồng bộ từ Pancake POS theo số điện thoại",
 		createLabel: "Thêm liên hệ",
 		fields: [
+			field(
+				"customerId",
+				"Khách hàng Pancake",
+				"relation",
+				"pancake",
+				INFO_CONTACT,
+				{
+					relation: "customer",
+					hidden: true,
+				},
+			),
 			field("name", "Tên liên hệ", "text", "pancake", INFO_CONTACT, {
 				required: true,
 				locked: true,
@@ -294,12 +307,19 @@ export const COLLECTIONS = {
 				list: true,
 			}),
 			field("email", "Email", "email", "pancake", INFO_CONTACT, { list: true }),
+			field("source", "Nguồn liên hệ", "select", "crm", INFO_CONTACT, {
+				options: SOURCE_OPTIONS,
+				list: true,
+			}),
 			field("assigneeId", "Người xử lý", "user", "pancake", INFO_CONTACT, {
+				list: true,
+			}),
+			field("status", "Trạng thái", "select", "crm", INFO_CONTACT, {
+				options: CONTACT_STATUSES,
 				list: true,
 			}),
 			field("tags", "Thẻ Pancake", "multiselect", "pancake", INFO_CONTACT, {
 				options: [],
-				list: true,
 			}),
 			field(
 				"relatedUserIds",
@@ -308,28 +328,7 @@ export const COLLECTIONS = {
 				"crm",
 				INFO_CONTACT,
 			),
-			field("birthday", "Ngày sinh", "date", "crm", INFO_CONTACT, {
-				list: true,
-			}),
-			field(
-				"customerId",
-				"Khách hàng Pancake",
-				"relation",
-				"pancake",
-				INFO_CONTACT,
-				{
-					relation: "customer",
-					list: true,
-				},
-			),
-			field("source", "Nguồn liên hệ", "select", "crm", INFO_CONTACT, {
-				options: SOURCE_OPTIONS,
-				list: true,
-			}),
-			field("status", "Trạng thái", "select", "crm", INFO_CONTACT, {
-				options: CONTACT_STATUSES,
-				list: true,
-			}),
+			field("birthday", "Ngày sinh", "date", "crm", INFO_CONTACT),
 			field("note", "Ghi chú", "textarea", "crm", INFO_CONTACT, { wide: true }),
 			field(
 				"secondaryPhones",
@@ -601,6 +600,7 @@ export function isCollectionKey(value: string): value is CollectionKey {
 export function fieldSections(fields: FieldDef[]): [string, FieldDef[]][] {
 	const groups = new Map<string, FieldDef[]>();
 	for (const item of fields) {
+		if (item.hidden) continue;
 		const key = item.section ?? "Thông tin";
 		groups.set(key, [...(groups.get(key) ?? []), item]);
 	}

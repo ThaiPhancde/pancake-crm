@@ -1,7 +1,9 @@
 import DataTable from "@carbon/icons-react/es/DataTable";
+import { Badge } from "@crm/ui/components/badge";
 import { Icon } from "@crm/ui/components/icon";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
+import { formatDate } from "@/components/pancake/format";
 import {
 	COLLECTIONS,
 	TICKET_CATEGORIES,
@@ -17,10 +19,10 @@ import {
 	SortButton,
 	ViewSwitch,
 } from "@/components/shop/filter-bar";
-import { ListFooter, ListTable } from "@/components/shop/list-table";
+import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { ShopPage, ShopPageBody, ShopPageHeader } from "@/components/shop/page";
-import type { SearchValues } from "@/components/shop/params";
+import { type SearchValues, text, withParams } from "@/components/shop/params";
 import { CreateRecordButton } from "@/components/shop/record-sheet";
 
 export default function TicketsPage(props: {
@@ -34,13 +36,30 @@ export default function TicketsPage(props: {
 	);
 }
 
-async function Tickets({ params }: { params: Promise<ShopRoute> }) {
-	const ctx = await loadShop(params);
-	const sellers = await ctx.api.sellers.query({ shopId: ctx.shopId });
+async function Tickets({
+	params,
+	searchParams,
+}: {
+	params: Promise<ShopRoute>;
+	searchParams: Promise<SearchValues>;
+}) {
+	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
+	const pageNum = Math.max(1, Number(text(values, "page") || "1"));
+	const [sellers, tickets] = await Promise.all([
+		ctx.api.sellers.query({ shopId: ctx.shopId }),
+		ctx.api.tickets.query({
+			shopId: ctx.shopId,
+			q: text(values, "q"),
+			status: text(values, "status") || undefined,
+			page: pageNum,
+			pageSize: 25,
+		}),
+	]);
 	const staff = sellers.map((seller) => ({
 		value: seller.employeeId,
 		label: seller.name,
 	}));
+	const sellerMap = new Map(sellers.map((s) => [s.employeeId, s.name]));
 	const collection = COLLECTIONS.ticket;
 	const columns = collection.fields
 		.filter((field) => field.list)
@@ -114,13 +133,47 @@ async function Tickets({ params }: { params: Promise<ShopRoute> }) {
 						options={TICKET_STATUSES}
 					/>
 				</FilterBar>
-				<ListTable columns={columns} rows={[]} />
+				<ListTable
+					columns={columns}
+					rows={tickets.rows.map((ticket) => {
+						const prioOpt = TICKET_PRIORITIES.find(
+							(p) => p.value === ticket.priority,
+						);
+						const statusOpt = TICKET_STATUSES.find(
+							(s) => s.value === ticket.status,
+						);
+						return {
+							key: ticket.id,
+							cells: [
+								`#${ticket.id.slice(-6).toUpperCase()}`,
+								ticket.title,
+								ticket.contactName ?? <Dash />,
+								ticket.phone ?? <Dash />,
+								ticket.email ?? <Dash />,
+								<Dash key="relatedUsers" />,
+								ticket.category ?? <Dash />,
+								<Badge key="prio" variant="orange">
+									{prioOpt?.label ?? ticket.priority}
+								</Badge>,
+								<Badge key="status" variant="blue">
+									{statusOpt?.label ?? ticket.status}
+								</Badge>,
+								ticket.assigneeId
+									? (sellerMap.get(ticket.assigneeId) ?? ticket.assigneeId)
+									: <Dash />,
+								ticket.dueAt ? formatDate(ticket.dueAt) : <Dash />,
+							],
+						};
+					})}
+				/>
 				<ListFooter
-					total={0}
-					page={1}
+					total={tickets.total}
+					page={pageNum}
 					pageSize={25}
 					unit="vấn đề"
-					pageHref={() => `${ctx.base}/tickets`}
+					pageHref={(next) =>
+						withParams(`${ctx.base}/tickets`, values, { page: String(next) })
+					}
 				/>
 			</ShopPageBody>
 		</ShopPage>

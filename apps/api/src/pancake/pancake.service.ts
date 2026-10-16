@@ -1,13 +1,32 @@
 import type { Db } from "@crm/db";
 import { PancakeAccessError } from "@crm/pancake/access";
-import { listInput, roleInput } from "@crm/pancake/contracts";
+import type {
+	approveEmployeeInput,
+	createAppointmentInput,
+	createLeadInput,
+	createNoteInput,
+	createTicketInput,
+	listInput,
+	recordListInput,
+	roleInput,
+} from "@crm/pancake/contracts";
 import {
+	approveAllEmployees,
+	approveEmployee,
 	connectionStatus,
+	createAppointment,
+	createLead,
+	createNote,
+	createTicket,
+	customerDetail,
 	customerPurchases,
 	dashboardReport,
+	listAppointments,
 	listCustomers,
+	listLeads,
 	listOrders,
 	listProducts,
+	listTickets,
 	membershipOptions,
 	operationsOverview,
 	orderDetail,
@@ -17,13 +36,13 @@ import {
 } from "@crm/pancake/queries";
 import {
 	createTask,
-	createTaskInput,
+	type createTaskInput,
 	listTasks,
 	PancakeTaskConflict,
 	taskAssignees,
-	taskListInput,
+	type taskListInput,
 	updateTask,
-	updateTaskInput,
+	type updateTaskInput,
 } from "@crm/pancake/tasks";
 import {
 	ConflictException,
@@ -41,6 +60,11 @@ export class PancakeService {
 	}
 	customers(userId: string, input: z.infer<typeof listInput>) {
 		return this.authorize(() => listCustomers(this.db, userId, input));
+	}
+	customerDetail(userId: string, shopId: string, customerId: string) {
+		return this.authorize(() =>
+			customerDetail(this.db, userId, shopId, customerId),
+		);
 	}
 	products(userId: string, input: z.infer<typeof listInput>) {
 		return this.authorize(() => listProducts(this.db, userId, input));
@@ -90,8 +114,38 @@ export class PancakeService {
 	membership(userId: string, input: z.infer<typeof roleInput>) {
 		return this.authorize(() => setMembership(this.db, userId, input));
 	}
+	approveEmployee(userId: string, input: z.infer<typeof approveEmployeeInput>) {
+		return this.authorize(() => approveEmployee(this.db, userId, input));
+	}
+	approveAllEmployees(userId: string, shopId: string) {
+		return this.authorize(() => approveAllEmployees(this.db, userId, shopId));
+	}
 	pause(userId: string, shopId: string) {
 		return this.authorize(() => pauseShop(this.db, userId, shopId));
+	}
+	leads(userId: string, input: z.infer<typeof recordListInput>) {
+		return this.authorize(() => listLeads(this.db, userId, input));
+	}
+	createLead(userId: string, input: z.infer<typeof createLeadInput>) {
+		return this.authorize(() => createLead(this.db, userId, input));
+	}
+	appointments(userId: string, input: z.infer<typeof recordListInput>) {
+		return this.authorize(() => listAppointments(this.db, userId, input));
+	}
+	createAppointment(
+		userId: string,
+		input: z.infer<typeof createAppointmentInput>,
+	) {
+		return this.authorize(() => createAppointment(this.db, userId, input));
+	}
+	tickets(userId: string, input: z.infer<typeof recordListInput>) {
+		return this.authorize(() => listTickets(this.db, userId, input));
+	}
+	createTicket(userId: string, input: z.infer<typeof createTicketInput>) {
+		return this.authorize(() => createTicket(this.db, userId, input));
+	}
+	createNote(userId: string, input: z.infer<typeof createNoteInput>) {
+		return this.authorize(() => createNote(this.db, userId, input));
 	}
 	private async authorize<T>(action: () => Promise<T>): Promise<T> {
 		try {

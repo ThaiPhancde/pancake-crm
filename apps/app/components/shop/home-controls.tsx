@@ -19,8 +19,9 @@ export function HomeViewSelect({ value }: { value: "manager" | "personal" }) {
 			value={value}
 			onValueChange={(next) => {
 				const params = new URLSearchParams(search.toString());
-				if (next === "manager") params.delete("view");
-				else params.set("view", next);
+				params.delete("view");
+				if (next === "manager") params.delete("scope");
+				else params.set("scope", next);
 				const query = params.toString();
 				router.push(query ? `${pathname}?${query}` : pathname);
 			}}

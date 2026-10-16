@@ -1,7 +1,7 @@
 import Add from "@carbon/icons-react/es/Add";
 import Search from "@carbon/icons-react/es/Search";
 import TrashCan from "@carbon/icons-react/es/TrashCan";
-import { Avatar, AvatarFallback } from "@crm/ui/components/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@crm/ui/components/avatar";
 import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
 import { Checkbox } from "@crm/ui/components/checkbox";
@@ -130,8 +130,11 @@ async function Branches({ params }: { params: Promise<ShopRoute> }) {
 							rows={sellers.map((seller) => ({
 								key: seller.employeeId,
 								cells: [
-									<span key="name" className="flex items-center gap-2">
-										<Avatar className="size-7">
+									<span key="name" className="flex items-center gap-2.5">
+										<Avatar className="size-8">
+											{seller.avatarUrl ? (
+												<AvatarImage src={seller.avatarUrl} alt={seller.name} />
+											) : null}
 											<AvatarFallback className="text-xs">
 												{seller.name.charAt(0).toUpperCase()}
 											</AvatarFallback>
@@ -139,12 +142,12 @@ async function Branches({ params }: { params: Promise<ShopRoute> }) {
 										<span className="flex flex-col">
 											<span className="font-medium">{seller.name}</span>
 											<span className="text-muted-foreground">
-												Mã NV {seller.employeeId}
+												{seller.email ?? `Mã NV ${seller.employeeId}`}
 											</span>
 										</span>
 									</span>,
 									<Badge key="role" variant="secondary">
-										Telesale
+										{seller.department ?? "Telesale"}
 									</Badge>,
 								],
 							}))}

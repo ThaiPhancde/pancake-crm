@@ -1,4 +1,8 @@
+import SettingsAdjust from "@carbon/icons-react/es/SettingsAdjust";
 import { Badge } from "@crm/ui/components/badge";
+import { Button } from "@crm/ui/components/button";
+import { Icon } from "@crm/ui/components/icon";
+import Link from "next/link";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
 import { formatAmount } from "@/components/pancake/format";
@@ -18,6 +22,10 @@ import {
 	shopFilters,
 	withParams,
 } from "@/components/shop/params";
+import {
+	ProductImageThumb,
+	ProductTypeHoverBadge,
+} from "@/components/shop/product-image-preview";
 import { CreateRecordButton } from "@/components/shop/record-sheet";
 import { shopProfile } from "@/components/shop/shop-profile";
 
@@ -58,13 +66,21 @@ async function Products({
 				title={collection.title}
 				description={collection.description}
 				actions={
-					<CreateRecordButton
-						collection="product"
-						menu={[
-							{ label: "Nhập từ Excel" },
-							{ label: "Đồng bộ từ Pancake POS" },
-						]}
-					/>
+					<>
+						<Button asChild variant="outline">
+							<Link href={`${ctx.base}/settings/tools/fields/product`}>
+								<Icon icon={SettingsAdjust} data-icon="inline-start" />
+								Giao diện
+							</Link>
+						</Button>
+						<CreateRecordButton
+							collection="product"
+							menu={[
+								{ label: "Nhập từ Excel" },
+								{ label: "Đồng bộ từ Pancake POS" },
+							]}
+						/>
+					</>
 				}
 			/>
 			<ShopPageBody>
@@ -92,30 +108,52 @@ async function Products({
 				</FilterBar>
 				<ListTable
 					columns={columns}
-					rows={products.rows.map((product) => ({
-						key: product.variationId,
-						cells: [
-							<span key="name" className="flex items-center gap-2">
-								{product.name}
-								{product.hidden ? <Badge variant="gray">Đã ẩn</Badge> : null}
-							</span>,
-							product.sku ?? product.variationId,
-							<Badge key="type" variant="soft-blue">
-								Sản phẩm
-							</Badge>,
-							variations.get(product.productId) ?? 1,
-							<Dash key="image" />,
-							product.price ? (
-								formatAmount(product.price, currency)
-							) : (
-								<Dash key="price" />
-							),
-							product.stock ?? <Dash key="stock" />,
-							<Dash key="duration" />,
-							<Dash key="description" />,
-							<Dash key="category" />,
-						],
-					}))}
+					rows={products.rows.map((product) => {
+						const skuText = product.sku ?? product.variationId;
+						const priceLabel = product.price
+							? formatAmount(product.price, currency)
+							: null;
+						return {
+							key: product.variationId,
+							cells: [
+								<span key="name" className="flex items-center gap-2 font-medium">
+									{product.name}
+									{product.hidden ? <Badge variant="gray">Đã ẩn</Badge> : null}
+								</span>,
+								skuText,
+								<ProductTypeHoverBadge
+									key="type"
+									name={product.name}
+									sku={skuText}
+									imageUrl={product.imageUrl}
+									priceLabel={priceLabel}
+								/>,
+								variations.get(product.productId) ?? 1,
+								<ProductImageThumb
+									key="image"
+									name={product.name}
+									sku={skuText}
+									imageUrl={product.imageUrl}
+									priceLabel={priceLabel}
+								/>,
+								priceLabel ?? <Dash key="price" />,
+								product.stock ?? <Dash key="stock" />,
+								<Dash key="duration" />,
+								product.description ? (
+									<span key="desc" className="truncate">
+										{product.description}
+									</span>
+								) : (
+									<Dash key="description" />
+								),
+								product.categories.length > 0 ? (
+									<span key="cat">{product.categories.join(", ")}</span>
+								) : (
+									<Dash key="category" />
+								),
+							],
+						};
+					})}
 				/>
 				<ListFooter
 					total={products.total}

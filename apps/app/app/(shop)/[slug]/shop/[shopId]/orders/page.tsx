@@ -100,14 +100,21 @@ async function Orders({
 				title={collection.title}
 				description={collection.description}
 				actions={
-					<CreateRecordButton
-						collection="order"
-						users={staff}
-						menu={[
-							{ label: "Nhập từ Excel" },
-							{ label: "Đồng bộ từ Pancake POS" },
-						]}
-					/>
+					<>
+						<Button asChild variant="outline">
+							<Link href={`${ctx.base}/settings/tools/fields/order`}>
+								Giao diện
+							</Link>
+						</Button>
+						<CreateRecordButton
+							collection="order"
+							users={staff}
+							menu={[
+								{ label: "Nhập từ Excel" },
+								{ label: "Đồng bộ từ Pancake POS" },
+							]}
+						/>
+					</>
 				}
 			/>
 			<ShopPageBody>
@@ -168,40 +175,51 @@ async function Orders({
 				</FilterBar>
 				<ListTable
 					columns={columns}
-					rows={list.rows.map((order) => ({
-						key: order.orderId,
-						href: withParams(page, values, { orderId: order.orderId }),
-						cells: [
-							`#${order.orderId}`,
-							order.customerId ? (
+					rows={list.rows.map((order) => {
+						const itemsSummary =
+							"itemsSummary" in order ? order.itemsSummary : "";
+						const discount = "discount" in order ? order.discount : "0";
+						const source = "source" in order ? order.source : null;
+						const note = "note" in order ? order.note : null;
+						return {
+							key: order.orderId,
+							href: withParams(page, values, { orderId: order.orderId }),
+							cells: [
+								`#${order.orderId}`,
+								order.customerId ? (
+									<Link
+										key="customer"
+										href={`${ctx.base}/contacts?customerId=${order.customerId}`}
+										className="hover:text-primary"
+									>
+										{order.customerName}
+									</Link>
+								) : (
+									order.customerName
+								),
+								order.customerPhone ?? <Dash />,
 								<Link
-									key="customer"
-									href={withParams(page, {}, { customerId: order.customerId })}
-									className="hover:text-primary"
+									key="items"
+									href={withParams(page, values, { orderId: order.orderId })}
+									className="text-primary hover:underline"
 								>
-									{order.customerName}
-								</Link>
-							) : (
-								order.customerName
-							),
-							order.customerPhone ?? <Dash />,
-							<Link
-								key="items"
-								href={withParams(page, values, { orderId: order.orderId })}
-								className="text-primary"
-							>
-								Xem sản phẩm
-							</Link>,
-							formatAmount(order.totalPrice, order.currency),
-							<Dash key="discount" />,
-							<Dash key="remaining" />,
-							<Dash key="source" />,
-							order.returnReason ?? <Dash />,
-							<Badge key="status" variant={orderStatusTone(order.status)}>
-								{orderStatusName(order.status)}
-							</Badge>,
-						],
-					}))}
+									{itemsSummary || "Xem sản phẩm"}
+								</Link>,
+								formatAmount(order.totalPrice, order.currency),
+								Number(discount) > 0 ? (
+									formatAmount(discount, order.currency)
+								) : (
+									<Dash key="discount" />
+								),
+								formatAmount(order.totalPrice, order.currency),
+								source ?? <Dash key="source" />,
+								note ?? order.returnReason ?? <Dash />,
+								<Badge key="status" variant={orderStatusTone(order.status)}>
+									{orderStatusName(order.status)}
+								</Badge>,
+							],
+						};
+					})}
 				/>
 				<ListFooter
 					total={list.total}

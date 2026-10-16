@@ -167,3 +167,31 @@ Agent chưa chạy suy luận trong triển khai này. Agent cần `AI_GATEWAY_A
 Sandbox upstream dùng Vercel, Docker hoặc microsandbox. Triển khai sandbox không Docker chưa được kiểm thử.
 
 Không cần các credentials AI để đồng bộ Pancake.
+
+## Automatic startup and recovery
+
+The `CompAI-CRM-Pancake` Scheduled Task starts at Windows sign-in and checks CRM processes every minute.
+It runs `Start-Crm.ps1 -Production -EnsureRunning` for the registered Windows account.
+The account must have an active Windows session.
+
+The starter preserves existing CRM processes and starts missing processes.
+It refuses ports owned by another application.
+A workspace lock prevents concurrent starters from creating duplicate processes.
+The task retries failed starts three times at one-minute intervals.
+
+```powershell
+.\scripts\windows\Register-CrmStartup.ps1
+.\scripts\windows\Start-Crm.ps1 -Production
+```
+
+`Stop-Crm.ps1` creates `.logs/runtime-paused` before stopping recorded CRM processes.
+The task respects this file and does not undo an intentional stop.
+Run `Start-Crm.ps1 -Production` without `-EnsureRunning` to resume recovery.
+
+The starter only launches the Pancake worker with `PANCAKE_LIVE_SYNC_ENABLED="1"`.
+Shop approval and fixture verification remain required by the worker.
+A disabled worker does not count as a failed startup.
+
+Startup errors are stored in `.logs/startup-error.log`.
+Process IDs and creation times are stored in `.logs/processes.json`.
+Monitor timing and ports are defined in `scripts/windows/Runtime-Config.psd1`.
