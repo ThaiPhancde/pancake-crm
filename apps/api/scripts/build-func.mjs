@@ -42,6 +42,7 @@ const VENDOR_ROOTS = [
 
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(funcDir, { recursive: true });
+mkdirSync(join(outDir, "static"), { recursive: true });
 
 console.log("• bundling function with bun build...");
 execSync(
