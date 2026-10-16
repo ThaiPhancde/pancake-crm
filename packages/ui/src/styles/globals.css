@@ -148,6 +148,64 @@
 	--shadow-2xl: 0px 16px 32px -8px hsl(0 0% 0% / 0.12);
 }
 
+.theme-shop,
+:root:has(.theme-shop) {
+	--background: #f0f2f5;
+	--foreground: #1f2937;
+	--card: #ffffff;
+	--card-foreground: #1f2937;
+	--popover: #ffffff;
+	--popover-foreground: #1f2937;
+	--primary: #1677ff;
+	--primary-foreground: #ffffff;
+	--secondary: #f5f6f8;
+	--secondary-foreground: #1f2937;
+	--muted: #f5f6f8;
+	--muted-foreground: #6b7280;
+	--accent: #e8f1ff;
+	--accent-foreground: #1677ff;
+	--border: #e5e7eb;
+	--input: #d9dee5;
+	--ring: #1677ff;
+	--chart-1: #1677ff;
+	--chart-2: #fa8c16;
+	--chart-3: #22c55e;
+	--chart-4: #9254de;
+	--chart-5: #13c2a3;
+	--sidebar: #1f3b5c;
+	--sidebar-foreground: #d7e1ec;
+	--sidebar-primary: #1677ff;
+	--sidebar-primary-foreground: #ffffff;
+	--sidebar-accent: #2f4d70;
+	--sidebar-accent-foreground: #ffffff;
+	--sidebar-border: #2b4668;
+	--sidebar-ring: #7fb0ff;
+	--radius: 6px;
+}
+
+.dark .theme-shop,
+:root.dark:has(.theme-shop) {
+	--background: #0f1419;
+	--foreground: #e5e7eb;
+	--card: #171d26;
+	--card-foreground: #e5e7eb;
+	--popover: #171d26;
+	--popover-foreground: #e5e7eb;
+	--secondary: #1f2730;
+	--secondary-foreground: #e5e7eb;
+	--muted: #1f2730;
+	--muted-foreground: #9aa3ad;
+	--accent: #1c2f4a;
+	--accent-foreground: #7fb0ff;
+	--border: #2a3341;
+	--input: #2a3341;
+	--ring: #7fb0ff;
+	--sidebar: #172b45;
+	--sidebar-foreground: #c6d2de;
+	--sidebar-accent: #27415f;
+	--sidebar-border: #223a57;
+}
+
 @theme inline {
 	--spacing-page-top: 40px;
 	--spacing-page-bottom: 40px;

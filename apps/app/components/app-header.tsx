@@ -29,7 +29,7 @@ import { useTRPC } from "@/lib/trpc/client";
 import { useWorkspaceUrl } from "@/lib/use-workspace-url";
 import { workspaceLabel } from "@/lib/workspace-label";
 
-type User = { name: string; email: string; image: string | null };
+export type User = { name: string; email: string; image: string | null };
 
 export function AppHeader({ user }: { user: User }) {
 	const { setOpen: setMobileNavOpen } = useMobileNav();
@@ -102,7 +102,13 @@ export function AppHeaderFallback() {
 	);
 }
 
-function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
+export function UserMenu({
+	user,
+	onSignOut,
+}: {
+	user: User;
+	onSignOut: () => void;
+}) {
 	const { resolvedTheme, setTheme } = useTheme();
 	const isDark = resolvedTheme === "dark";
 

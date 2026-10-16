@@ -60,7 +60,8 @@ const ITEMS: RailItem[] = [
 	{ title: "Deals", href: "/deals", icon: Partnership, match: "prefix" },
 	{
 		title: "Pancake CRM",
-		href: "/pancake",
+		href: "/shop",
+		related: ["/pancake"],
 		icon: ShoppingCart,
 		match: "prefix",
 	},

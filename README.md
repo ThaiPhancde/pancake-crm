@@ -192,6 +192,10 @@ Written up where the work happens, not in a style guide:
 Windows with existing PostgreSQL and a read-only Pancake POS integration:
 [deployment guide](./docs/pancake-windows.md), [audit report](./docs/pancake-audit.md), and [operations, tasks and read-only MCP](./docs/pancake-rebuild.md).
 
+Open `/[slug]/shop` for Pancake shop workspaces. The workspace selector opens each shop with its own sidebar.
+Existing `/[slug]/pancake` links redirect to the corresponding shop page and preserve filters.
+See the [workspace handoff](./docs/shop-workspaces-handoff.md) for validation and remaining backend work.
+
 You need [Bun](https://bun.com) and Docker.
 
 ```sh

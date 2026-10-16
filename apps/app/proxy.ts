@@ -18,7 +18,14 @@ const UNGATED = ["/grant-access", "/eve"];
 
 const ANONYMOUS = ["/t", "/pancake-demo"];
 
-const SECTIONS = ["/companies", "/contacts", "/deals", "/settings", "/pancake"];
+const SECTIONS = [
+	"/companies",
+	"/contacts",
+	"/deals",
+	"/settings",
+	"/pancake",
+	"/shop",
+];
 
 export async function proxy(request: NextRequest) {
 	const { pathname } = request.nextUrl;
@@ -51,7 +58,9 @@ export async function proxy(request: NextRequest) {
 
 	if (workspace.gate === "required") return sendTo(ONBOARDING_PATH, request);
 	const segments = pathname.split("/").filter(Boolean);
-	const pancake = segments[0] === "pancake" || segments[1] === "pancake";
+	const pancake = ["pancake", "shop"].some(
+		(section) => segments[0] === section || segments[1] === section,
+	);
 	if (research === "required" && !pancake)
 		return sendTo(RESEARCH_PATH, request);
 

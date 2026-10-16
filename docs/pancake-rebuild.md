@@ -4,6 +4,13 @@
 
 ## Phạm vi
 
+Giao diện workspace dùng `/[slug]/shop`. Trang này chuyển tới shop đầu tiên được cấp quyền.
+Mỗi shop dùng `/[slug]/shop/[shopId]`, với sidebar và bộ chọn shop riêng.
+Các trang chính là `/orders`, `/contacts`, `/products`, `/calendar`, `/leads`, `/tickets` và `/reports/*`.
+URL cũ `/[slug]/pancake` chuyển sang trang mới theo `tab` và `shopId`, giữ bộ lọc và mã chi tiết.
+Tab Công việc chuyển tới `/reports/tasks`. Bộ chọn shop có nút quay về bảng điều khiển CRM.
+Xem [bàn giao workspace](shop-workspaces-handoff.md) để biết phần backend còn thiếu.
+
 Giữ nền Next.js, NestJS, PostgreSQL và các chức năng CRM, AI Agent hiện có.
 
 Tham khảo cách tổ chức khách hàng, đơn hàng và nhiệm vụ của [Pancake CRM](https://docs.pancake.biz/crm/intro) và [module Nhiệm vụ](https://docs.pancake.biz/crm/st-f2/st-p8?lang=vi). Trang `crm.pancake.vn` cần đăng nhập để xem đầy đủ. Bản này dùng tài liệu công khai để thiết kế luồng vận hành, không sao chép giao diện nội bộ.

@@ -356,6 +356,37 @@ describe("the slug the app is served under", () => {
 });
 
 describe("the research key gate", () => {
+	it("opens shop workspaces without a research key", async () => {
+		setup({ configured: false });
+		for (const path of [`/${SLUG}/shop`, `/${SLUG}/shop/10001/orders`]) {
+			expect(
+				redirectedTo(await proxy(request(path, [SESSION_COOKIE]))),
+			).toBeNull();
+		}
+	});
+
+	it("resolves unscoped shop links and preserves filters", async () => {
+		setup({ configured: false });
+		const response = await proxy(
+			request("/shop/10001/orders?q=sample", [SESSION_COOKIE]),
+		);
+		const location = new URL(
+			response.headers.get("location") ?? "http://invalid",
+		);
+		expect(location.pathname).toBe(`/${SLUG}/shop/10001/orders`);
+		expect(location.search).toBe("?q=sample");
+	});
+
+	it("keeps authentication and workspace onboarding on shop routes", async () => {
+		expect(redirectedTo(await proxy(request(`/${SLUG}/shop`)))).toBe(
+			"/sign-in",
+		);
+		setup({ onboarded: false, configured: false });
+		expect(
+			redirectedTo(await proxy(request(`/${SLUG}/shop`, [SESSION_COOKIE]))),
+		).toBe("/onboarding");
+	});
+
 	it("sends an onboarded rep with no key to the key form", async () => {
 		setup({ configured: false });
 
