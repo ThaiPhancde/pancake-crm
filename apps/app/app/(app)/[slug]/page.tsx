@@ -56,7 +56,9 @@ export default function OverviewPage({
 				<PageShellActions>
 					<RefreshButton />
 					<Suspense
-						fallback={<div className="h-8 w-80 animate-pulse rounded-md bg-muted" />}
+						fallback={
+							<div className="h-8 w-80 animate-pulse rounded-md bg-muted" />
+						}
 					>
 						<RangeToggle
 							quick={["today", "week", "month", "30d"]}
@@ -185,126 +187,132 @@ async function MultiShopDashboard({
 						Thông số riêng từng Shop Pancake ({shops.length})
 					</h2>
 					<p className="text-muted-foreground text-xs">
-						Doanh thu và vận hành của mỗi thị trường theo đơn vị tiền tệ bản
-						địa
+						Doanh thu và vận hành của mỗi thị trường theo đơn vị tiền tệ bản địa
 					</p>
 				</div>
 
 				<div className="grid gap-4 lg:grid-cols-3">
-					{perShopReports.map(({ shop, overview: sOverview, report: sReport }) => {
-						const profile = shopProfile(shop.id);
-						const shopRevenue = sReport.revenue.reduce(
-							(sum, r) => sum + Number(r.amount),
-							0,
-						);
-						const rate = sReport.orders
-							? ((100 * sReport.delivered) / sReport.orders).toFixed(1)
-							: "0.0";
-						return (
-							<div
-								key={shop.id}
-								className="flex flex-col justify-between rounded-xl border bg-card p-5 shadow-2xs"
-							>
-								<div>
-									<div className="flex items-start justify-between gap-3">
-										<div className="flex items-center gap-3">
-											<div className="flex size-10 items-center justify-center rounded-lg bg-[#e5533d] font-bold text-base text-white">
-												{shopInitial(shop.name)}
-											</div>
-											<div>
-												<div className="flex items-center gap-2">
-													<Link
-														href={withParams(
-															`/${slug}/shop/${shop.id}`,
-															values,
-															{},
-														)}
-														className="font-semibold text-base hover:text-primary"
-													>
-														{shop.name}
-													</Link>
-													<Badge variant="secondary" className="text-[10px]">
-														{shop.currency}
-													</Badge>
+					{perShopReports.map(
+						({ shop, overview: sOverview, report: sReport }) => {
+							const profile = shopProfile(shop.id);
+							const shopRevenue = sReport.revenue.reduce(
+								(sum, r) => sum + Number(r.amount),
+								0,
+							);
+							const rate = sReport.orders
+								? ((100 * sReport.delivered) / sReport.orders).toFixed(1)
+								: "0.0";
+							return (
+								<div
+									key={shop.id}
+									className="flex flex-col justify-between rounded-xl border bg-card p-5 shadow-2xs"
+								>
+									<div>
+										<div className="flex items-start justify-between gap-3">
+											<div className="flex items-center gap-3">
+												<div className="flex size-10 items-center justify-center rounded-lg bg-[#e5533d] font-bold text-base text-white">
+													{shopInitial(shop.name)}
 												</div>
-												<div className="text-muted-foreground text-xs">
-													#{shop.id} · {profile.country} ({profile.timezone})
+												<div>
+													<div className="flex items-center gap-2">
+														<Link
+															href={withParams(
+																`/${slug}/shop/${shop.id}`,
+																values,
+																{},
+															)}
+															className="font-semibold text-base hover:text-primary"
+														>
+															{shop.name}
+														</Link>
+														<Badge variant="secondary" className="text-[10px]">
+															{shop.currency}
+														</Badge>
+													</div>
+													<div className="text-muted-foreground text-xs">
+														#{shop.id} · {profile.country} ({profile.timezone})
+													</div>
+												</div>
+											</div>
+											<Badge variant={shop.syncEnabled ? "green" : "orange"}>
+												{shop.syncEnabled ? "Live" : "Tạm dừng"}
+											</Badge>
+										</div>
+
+										<div className="mt-4 rounded-lg bg-muted/50 p-3.5">
+											<div className="text-muted-foreground text-xs">
+												Doanh thu đơn đã nhận ({shop.currency})
+											</div>
+											<div className="mt-1 font-bold text-xl tabular-nums">
+												{formatAmount(String(shopRevenue), shop.currency)}
+											</div>
+											<div className="mt-1 text-muted-foreground text-[11px]">
+												Tỷ lệ giao thành công: <strong>{rate}%</strong> (
+												{sReport.delivered}/{sReport.orders} đơn)
+											</div>
+										</div>
+
+										<div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+											<div className="rounded-md border p-2">
+												<div className="text-muted-foreground text-[11px]">
+													Chờ xử lý
+												</div>
+												<div className="mt-0.5 font-semibold tabular-nums">
+													{sOverview.pending}
+												</div>
+											</div>
+											<div className="rounded-md border p-2">
+												<div className="text-muted-foreground text-[11px]">
+													Đang giao
+												</div>
+												<div className="mt-0.5 font-semibold tabular-nums">
+													{sOverview.shipping}
+												</div>
+											</div>
+											<div className="rounded-md border p-2">
+												<div className="text-muted-foreground text-[11px]">
+													Hoàn / Hủy
+												</div>
+												<div className="mt-0.5 font-semibold tabular-nums">
+													{sReport.returned + sReport.cancelled}
 												</div>
 											</div>
 										</div>
-										<Badge variant={shop.syncEnabled ? "green" : "orange"}>
-											{shop.syncEnabled ? "Live" : "Tạm dừng"}
-										</Badge>
 									</div>
 
-									<div className="mt-4 rounded-lg bg-muted/50 p-3.5">
-										<div className="text-muted-foreground text-xs">
-											Doanh thu đơn đã nhận ({shop.currency})
-										</div>
-										<div className="mt-1 font-bold text-xl tabular-nums">
-											{formatAmount(String(shopRevenue), shop.currency)}
-										</div>
-										<div className="mt-1 text-muted-foreground text-[11px]">
-											Tỷ lệ giao thành công: <strong>{rate}%</strong> (
-											{sReport.delivered}/{sReport.orders} đơn)
-										</div>
-									</div>
-
-									<div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-										<div className="rounded-md border p-2">
-											<div className="text-muted-foreground text-[11px]">
-												Chờ xử lý
-											</div>
-											<div className="mt-0.5 font-semibold tabular-nums">
-												{sOverview.pending}
-											</div>
-										</div>
-										<div className="rounded-md border p-2">
-											<div className="text-muted-foreground text-[11px]">
-												Đang giao
-											</div>
-											<div className="mt-0.5 font-semibold tabular-nums">
-												{sOverview.shipping}
-											</div>
-										</div>
-										<div className="rounded-md border p-2">
-											<div className="text-muted-foreground text-[11px]">
-												Hoàn / Hủy
-											</div>
-											<div className="mt-0.5 font-semibold tabular-nums">
-												{sReport.returned + sReport.cancelled}
-											</div>
-										</div>
-									</div>
-								</div>
-
-								<div className="mt-4 flex items-center justify-between border-t pt-3 text-xs">
-									<span className="text-muted-foreground">
-										Tổng kho dữ liệu:{" "}
-										<strong>
-											{shop.ordersCount.toLocaleString("en-US")}
-										</strong>{" "}
-										đơn ·{" "}
-										<strong>
-											{shop.customersCount.toLocaleString("en-US")}
-										</strong>{" "}
-										khách
-									</span>
-									<Button asChild variant="link" size="sm" className="h-auto p-0">
-										<Link
-											href={withParams(
-												`/${slug}/shop/${shop.id}`,
-												values,
-												{},
-											)}
+									<div className="mt-4 flex items-center justify-between border-t pt-3 text-xs">
+										<span className="text-muted-foreground">
+											Tổng kho dữ liệu:{" "}
+											<strong>
+												{shop.ordersCount.toLocaleString("en-US")}
+											</strong>{" "}
+											đơn ·{" "}
+											<strong>
+												{shop.customersCount.toLocaleString("en-US")}
+											</strong>{" "}
+											khách
+										</span>
+										<Button
+											asChild
+											variant="link"
+											size="sm"
+											className="h-auto p-0"
 										>
-											Vào shop →
-										</Link>
-									</Button>
+											<Link
+												href={withParams(
+													`/${slug}/shop/${shop.id}`,
+													values,
+													{},
+												)}
+											>
+												Vào shop →
+											</Link>
+										</Button>
+									</div>
 								</div>
-							</div>
-						);
-					})}
+							);
+						},
+					)}
 				</div>
 			</div>
 

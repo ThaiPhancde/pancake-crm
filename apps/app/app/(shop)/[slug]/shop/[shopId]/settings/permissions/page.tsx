@@ -101,6 +101,18 @@ const ACTIONS = [
 	"Xuất dữ liệu",
 ];
 
+const FALLBACK_PROFILE: ProfileDef = {
+	key: "viewer",
+	label: "Người xem",
+	role: "VIEWER",
+	description:
+		"Chỉ có quyền xem dữ liệu trên shop, không được chỉnh sửa hoặc xóa bản ghi.",
+};
+
+function profileAt(index: number): ProfileDef {
+	return PROFILES[index] ?? PROFILES[0] ?? FALLBACK_PROFILE;
+}
+
 function allowed(
 	profileKey: string,
 	role: Role,
@@ -110,7 +122,8 @@ function allowed(
 	if (action === "Cấu hình") {
 		if (!configurable) return false;
 		return (
-			role === "MANAGER" && ["ceo", "admin", "sale-manager"].includes(profileKey)
+			role === "MANAGER" &&
+			["ceo", "admin", "sale-manager"].includes(profileKey)
 		);
 	}
 	if (role === "MANAGER") {
@@ -125,12 +138,12 @@ function allowed(
 
 function profileForEmployee(role: Role, roleCode: string | null): ProfileDef {
 	if (role === "MANAGER") {
-		if (roleCode === "1") return PROFILES[0]!;
-		if (roleCode === "2") return PROFILES[1]!;
-		return PROFILES[2]!;
+		if (roleCode === "1") return profileAt(0);
+		if (roleCode === "2") return profileAt(1);
+		return profileAt(2);
 	}
-	if (role === "TELESALE") return PROFILES[3]!;
-	return PROFILES[4]!;
+	if (role === "TELESALE") return profileAt(3);
+	return profileAt(4);
 }
 
 export default function PermissionsPage(props: {
@@ -183,8 +196,7 @@ async function Permissions({
 		const mappedUser = mappedMember
 			? userById.get(mappedMember.userId)
 			: options.users.find(
-					(u) =>
-						emp.email && u.email.toLowerCase() === emp.email.toLowerCase(),
+					(u) => emp.email && u.email.toLowerCase() === emp.email.toLowerCase(),
 				);
 		const isManager = emp.roleCode === "1" || emp.roleCode === "2";
 		const effectiveRole: Role =
@@ -207,7 +219,8 @@ async function Permissions({
 	});
 
 	for (const member of options.members) {
-		if (member.employeeId && memberByEmployeeId.has(member.employeeId)) continue;
+		if (member.employeeId && memberByEmployeeId.has(member.employeeId))
+			continue;
 		const u = userById.get(member.userId);
 		if (!u) continue;
 		const profile = profileForEmployee(member.role, "1");
@@ -242,9 +255,9 @@ async function Permissions({
 	const selectedKey = text(values, "user") || filteredStaff[0]?.key || "";
 	const selectedStaff =
 		filteredStaff.find((s) => s.key === selectedKey) ?? filteredStaff[0];
-	const selectedProfileKey = text(values, "profile") || PROFILES[0]!.key;
+	const selectedProfileKey = text(values, "profile") || profileAt(0).key;
 	const activeProfile =
-		PROFILES.find((p) => p.key === selectedProfileKey) ?? PROFILES[0]!;
+		PROFILES.find((p) => p.key === selectedProfileKey) ?? profileAt(0);
 
 	async function save(form: FormData) {
 		"use server";
@@ -330,9 +343,7 @@ async function Permissions({
 				>
 					<Icon icon={Folder} className="size-4" />
 					Hồ sơ
-					<Badge
-						variant={activeTab === "profiles" ? "soft-blue" : "secondary"}
-					>
+					<Badge variant={activeTab === "profiles" ? "soft-blue" : "secondary"}>
 						{PROFILES.length}
 					</Badge>
 				</Link>
@@ -503,9 +514,7 @@ async function Permissions({
 													{selectedStaff.name}
 												</h2>
 												<Badge
-													variant={
-														selectedStaff.approved ? "green" : "orange"
-													}
+													variant={selectedStaff.approved ? "green" : "orange"}
 												>
 													{selectedStaff.approved
 														? "Đã kích hoạt CRM"
@@ -580,9 +589,7 @@ async function Permissions({
 											</Select>
 										</Field>
 										<Button type="submit" variant="outline">
-											{selectedStaff.approved
-												? "Chỉnh sửa"
-												: "Xét duyệt & Lưu"}
+											{selectedStaff.approved ? "Chỉnh sửa" : "Xét duyệt & Lưu"}
 										</Button>
 									</div>
 								</form>
@@ -671,7 +678,9 @@ function RoleFields({
 					</SelectTrigger>
 					<SelectContent>
 						<SelectGroup>
-							<SelectItem value="MANAGER">CEO / Admin / Sale Manager</SelectItem>
+							<SelectItem value="MANAGER">
+								CEO / Admin / Sale Manager
+							</SelectItem>
 							<SelectItem value="TELESALE">Telesale</SelectItem>
 							<SelectItem value="VIEWER">Người xem</SelectItem>
 						</SelectGroup>
