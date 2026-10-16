@@ -177,11 +177,18 @@ writeFileSync(
 	JSON.stringify({
 		version: 3,
 		routes: [{ src: "/(.*)", dest: "/api/index" }],
-		crons: [{ path: "/internal/sync/google", schedule: "*/5 * * * *" }],
+		crons: [],
 	}),
 );
 
 console.log(`✓ built ${outDir}`);
+
+const localOutDir = join(apiDir, ".vercel/output");
+if (localOutDir !== outDir) {
+	rmSync(localOutDir, { recursive: true, force: true });
+	cpSync(outDir, localOutDir, { recursive: true });
+	console.log(`✓ mirrored to ${localOutDir}`);
+}
 
 const isProductionDeployment = process.env.VERCEL_ENV === "production";
 
