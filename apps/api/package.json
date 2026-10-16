@@ -8,7 +8,7 @@
 		"./app-router": "./src/generated/server.ts"
 	},
 	"scripts": {
-		"build": "bun build src/main.ts --target=bun --outdir dist --packages=external --sourcemap && node scripts/build-func.mjs",
+		"build": "bun build src/main.ts --target=bun --outdir dist --packages=external --sourcemap && bun build src/serverless.ts --target=node --format=esm --outfile=api/index.js --external @nestjs/microservices --external @nestjs/websockets --external @nestjs/platform-fastify --external @nestjs/graphql --external @nestjs/swagger --external class-transformer/storage --external pg-native --external better-sqlite3 --external cardinal && node scripts/build-func.mjs",
 		"check-types": "tsc --noEmit",
 		"dev": "concurrently -n api,trpc -c blue,magenta \"bun --watch src/main.ts\" \"bun run dev:trpc\"",
 		"dev:trpc": "nestjs-trpc watch -e src/app.module.ts -r \"**/*.router.ts\" -o src/generated",

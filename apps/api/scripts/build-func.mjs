@@ -47,7 +47,7 @@ mkdirSync(join(outDir, "static"), { recursive: true });
 console.log("• bundling function with bun build...");
 execSync(
 	[
-		`${bun} build api/index.ts`,
+		`${bun} build src/serverless.ts`,
 		"--target=node",
 		"--format=esm",
 		`--outfile=${JSON.stringify(join(funcDir, "index.mjs"))}`,
