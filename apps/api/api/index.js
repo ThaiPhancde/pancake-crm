@@ -319452,6 +319452,7 @@ var PANCAKE = {
   transactionMs: 600000,
   syncLeaseMs: 900000,
   workerRestartCode: "WORKER_RESTART",
+  employeeSyncMs: 60 * MINUTE_MS4,
   orderRawDrop: ["histories"],
   webhookMaxBytes: 1048576,
   webhookMaxAttempts: 8,

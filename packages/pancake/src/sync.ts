@@ -247,6 +247,17 @@ export async function syncShop(
 		let allComplete = true;
 		const failures: string[] = [];
 		for (const resource of RESOURCES) {
+			if (resource === "employees") {
+				const known = await db.pancakeSyncCursor.findUnique({
+					where: { shopId_resource: { shopId: shop.id, resource } },
+					select: { watermark: true },
+				});
+				if (
+					known?.watermark &&
+					Date.now() - known.watermark.getTime() < PANCAKE.employeeSyncMs
+				)
+					continue;
+			}
 			assertLiveAllowed(
 				await db.pancakeShop.findUniqueOrThrow({ where: { id: shop.id } }),
 			);
