@@ -321150,6 +321150,9 @@ async function orderDetail(db4, userId, shopId2, orderId) {
     }))
   };
 }
+async function homeCurrencies(db4, shopIds) {
+  return new Map(await Promise.all([...new Set(shopIds)].map(async (id2) => [id2, (await effectiveSettings(db4, id2)).currency])));
+}
 function spendAmounts(groups) {
   return groups.map((g2) => ({
     currency: g2.currency,
@@ -321192,6 +321195,8 @@ async function listCustomers(db4, userId, input2) {
       } : {}
     ]
   };
+  const home = await homeCurrencies(db4, selected.map((grant) => grant.shopId));
+  const homeSet = new Set(home.values());
   const [rows, total, orderStats, repeatGroups] = await Promise.all([
     db4.pancakeCustomer.findMany({
       where,
@@ -321264,6 +321269,8 @@ async function listCustomers(db4, userId, input2) {
   const orderCounts = new Map(countGroups.map((g2) => [`${g2.shopId}:${g2.customerId}`, g2._count._all]));
   const spentByCustomer = new Map;
   for (const g2 of spendGroups) {
+    if (g2.currency !== home.get(g2.shopId))
+      continue;
     const key = `${g2.shopId}:${g2.customerId}`;
     spentByCustomer.set(key, [
       ...spentByCustomer.get(key) ?? [],
@@ -321307,7 +321314,7 @@ async function listCustomers(db4, userId, input2) {
     total,
     summary: {
       newContacts: total,
-      totalSpent: spendAmounts(orderStats),
+      totalSpent: spendAmounts(orderStats.filter((group) => homeSet.has(group.currency))),
       spendWindowDays: PANCAKE.spendWindowDays,
       returningRate,
       currency: currency2
@@ -321381,6 +321388,8 @@ async function customerDetail(db4, userId, shopId2, customerId) {
   const countStatuses = (statuses, include) => statusCounts.reduce((sum, row) => statuses.includes(row.status) === include ? sum + row._count._all : sum, 0);
   const orderCount = countStatuses(PANCAKE.bookedExcludedStatuses, false);
   const deliveredCount = countStatuses(PANCAKE.receivedStatuses, true);
+  const homeCurrency = (await effectiveSettings(db4, shopId2)).currency;
+  const homeRecent = recent.filter((group) => group.currency === homeCurrency);
   const empMeta = employee ? parseEmployeeMeta(employee.raw) : null;
   const currency2 = orders[0]?.currency ?? PANCAKE.shopCurrency.get(shopId2) ?? PANCAKE.defaultCurrency;
   return {
@@ -321403,8 +321412,8 @@ async function customerDetail(db4, userId, shopId2, customerId) {
     canWrite: canWrite(grants, shopId2),
     orderCount,
     deliveredCount,
-    totalSpent: spendAmounts(recent),
-    recentOrderCount: recent.reduce((sum, g2) => sum + g2._count._all, 0),
+    totalSpent: spendAmounts(homeRecent),
+    recentOrderCount: homeRecent.reduce((sum, g2) => sum + g2._count._all, 0),
     spendWindowDays: PANCAKE.spendWindowDays,
     currency: currency2,
     orders: orders.map(({ raw: raw4, ...ord }) => {
@@ -321692,6 +321701,7 @@ async function dashboardReport(db4, userId, input2) {
     parseEmployeeMeta(e3.raw).avatarUrl
   ]));
   const performance2 = new Map;
+  const home = await homeCurrencies(db4, groups.map((group) => group.shopId));
   const booked = new Map;
   const bookedOrders = new Map;
   const collected = new Map;
@@ -321705,11 +321715,13 @@ async function dashboardReport(db4, userId, input2) {
     const isBooked = !PANCAKE.bookedExcludedStatuses.includes(group.status);
     const isCancelled = PANCAKE.cancelledStatuses.includes(group.status);
     const isReturned = PANCAKE.returnedStatuses.includes(group.status);
+    const isHome = group.currency === home.get(group.shopId);
     if (isReceived) {
       delivered += group.orders;
-      addAmount(collected, group.currency, group.productValue);
+      if (isHome)
+        addAmount(collected, group.currency, group.productValue);
     }
-    if (isBooked) {
+    if (isBooked && isHome) {
       addAmount(booked, group.currency, group.productValue);
       bookedOrders.set(group.currency, (bookedOrders.get(group.currency) ?? 0) + group.orders);
     }
@@ -321717,13 +321729,13 @@ async function dashboardReport(db4, userId, input2) {
       cancelled += group.orders;
     if (isReturned)
       returned += group.orders;
-    const key = JSON.stringify([group.shopId, group.sellerId, group.currency]);
+    const key = JSON.stringify([group.shopId, group.sellerId]);
     const row = performance2.get(key) ?? {
       shopId: group.shopId,
       sellerId: group.sellerId,
       sellerName: group.sellerName ?? "Chưa phân công",
       sellerAvatarUrl: group.sellerId ? avatarMap.get(`${group.shopId}:${group.sellerId}`) ?? null : null,
-      currency: group.currency,
+      currency: home.get(group.shopId) ?? group.currency,
       orders: 0,
       delivered: 0,
       cancelled: 0,
@@ -321734,9 +321746,10 @@ async function dashboardReport(db4, userId, input2) {
     row.orders += group.orders;
     if (isReceived) {
       row.delivered += group.orders;
-      row.received = row.received.add(group.productValue);
+      if (isHome)
+        row.received = row.received.add(group.productValue);
     }
-    if (isBooked)
+    if (isBooked && isHome)
       row.revenue = row.revenue.add(group.productValue);
     if (isCancelled)
       row.cancelled += group.orders;

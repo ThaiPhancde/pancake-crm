@@ -7,7 +7,7 @@ import {
 	pageComplete,
 } from "./client";
 import { assertCrmDatabase, PANCAKE, RESOURCES, type Resource } from "./config";
-import { storeRecord } from "./store";
+import { changedRecords, storeRecord } from "./store";
 
 export function assertLiveAllowed(
 	shop: Pick<
@@ -96,10 +96,17 @@ export async function syncResource(
 		const complete = pageComplete(page, cursor.nextPage, resource);
 		if (!complete && page.data.length === 0)
 			throw new PancakeApiError("EMPTY_INCOMPLETE_PAGE");
+		const fresh = await changedRecords(
+			db,
+			shopId,
+			resource,
+			page.data,
+			fetchedAt,
+		);
 		const committed = await db.$transaction(
 			async (tx) => {
 				let written = 0;
-				for (const item of page.data) {
+				for (const item of fresh) {
 					if (item === null) throw new PancakeApiError("INVALID_RECORD");
 					if (await storeRecord(tx, shopId, resource, item, fetchedAt))
 						written++;
@@ -162,10 +169,17 @@ export async function syncRecent(
 			start,
 			end: now,
 		});
+		const fresh = await changedRecords(
+			db,
+			shopId,
+			resource,
+			page.data,
+			fetchedAt,
+		);
 		const written = await db.$transaction(
 			async (tx) => {
 				let count = 0;
-				for (const item of page.data) {
+				for (const item of fresh) {
 					if (item === null) throw new PancakeApiError("INVALID_RECORD");
 					if (await storeRecord(tx, shopId, resource, item, fetchedAt)) count++;
 				}
@@ -238,6 +252,11 @@ export async function syncShop(
 				take: PANCAKE.webhookBatch,
 			});
 			try {
+				if (!readerOverride) {
+					const recent = await syncRecent(db, shop.id, resource, reader);
+					pages += recent.pages;
+					records += recent.records;
+				}
 				const outcome = await syncResource(
 					db,
 					shop.id,
@@ -248,11 +267,6 @@ export async function syncShop(
 				pages += outcome.pages;
 				records += outcome.records;
 				allComplete &&= outcome.complete;
-				if (!outcome.complete && !readerOverride) {
-					const recent = await syncRecent(db, shop.id, resource, reader);
-					pages += recent.pages;
-					records += recent.records;
-				}
 				if (outcome.complete && jobs.length)
 					await db.pancakeWebhookJob.updateMany({
 						where: {

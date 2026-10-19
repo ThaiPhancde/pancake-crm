@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Prisma } from "@crm/db";
+import type { Db, Prisma } from "@crm/db";
 import { PANCAKE, type Resource } from "./config";
 import {
 	customerWire,
@@ -164,26 +164,21 @@ export async function storeRecord(
 		create: { shopId, orderId: item.id, ...data },
 		update: data,
 	});
+	const history: Prisma.PancakeOrderHistoryCreateManyInput[] = [];
 	for (const event of item.status_history ?? []) {
 		const occurredAt = event.updated_at ?? event.inserted_at;
 		if (!occurredAt) continue;
-		const eventKey = hash(
-			`${event.status}:${event.old_status}:${occurredAt}:${event.editor_id ?? ""}`,
-		);
-		await tx.pancakeOrderHistory.createMany({
-			data: [
-				{
-					shopId,
-					orderId: item.id,
-					eventKey,
-					oldStatus: event.old_status ?? null,
-					status: event.status,
-					actorId: event.editor_id ?? null,
-					occurredAt: sourceDate(occurredAt),
-					source: "pancake-history",
-				},
-			],
-			skipDuplicates: true,
+		history.push({
+			shopId,
+			orderId: item.id,
+			eventKey: hash(
+				`${event.status}:${event.old_status}:${occurredAt}:${event.editor_id ?? ""}`,
+			),
+			oldStatus: event.old_status ?? null,
+			status: event.status,
+			actorId: event.editor_id ?? null,
+			occurredAt: sourceDate(occurredAt),
+			source: "pancake-history",
 		});
 	}
 	if (
@@ -193,28 +188,91 @@ export async function storeRecord(
 		current.deliveryStatus !== data.deliveryStatus ||
 		current.trackingCode !== data.trackingCode
 	) {
-		await tx.pancakeOrderHistory.createMany({
-			data: [
-				{
-					shopId,
-					orderId: item.id,
-					eventKey: hash(
-						`snapshot:${item.updated_at}:${data.status}:${data.subStatus}:${deliveryStatus}:${data.trackingCode}`,
-					),
-					oldStatus: current?.status ?? null,
-					status: data.status,
-					subStatus: data.subStatus,
-					deliveryStatus,
-					trackingCode: data.trackingCode,
-					actorId: data.lastEditorId,
-					occurredAt: updated,
-					source: "poll-snapshot",
-				},
-			],
-			skipDuplicates: true,
+		history.push({
+			shopId,
+			orderId: item.id,
+			eventKey: hash(
+				`snapshot:${item.updated_at}:${data.status}:${data.subStatus}:${deliveryStatus}:${data.trackingCode}`,
+			),
+			oldStatus: current?.status ?? null,
+			status: data.status,
+			subStatus: data.subStatus,
+			deliveryStatus,
+			trackingCode: data.trackingCode,
+			actorId: data.lastEditorId,
+			occurredAt: updated,
+			source: "poll-snapshot",
 		});
 	}
+	if (history.length)
+		await tx.pancakeOrderHistory.createMany({
+			data: history,
+			skipDuplicates: true,
+		});
 	return true;
+}
+
+type Probe = { id: string; updated: Date | null };
+
+function probe(resource: Resource, value: Prisma.InputJsonValue): Probe | null {
+	try {
+		if (resource === "orders") {
+			const item = orderWire.parse(value);
+			return { id: item.id, updated: sourceDate(item.updated_at) };
+		}
+		if (resource === "customers") {
+			const item = customerWire.parse(value);
+			return {
+				id: item.id,
+				updated: item.updated_at ? sourceDate(item.updated_at) : null,
+			};
+		}
+	} catch {
+		return null;
+	}
+	return null;
+}
+
+export async function changedRecords(
+	db: Db,
+	shopId: string,
+	resource: Resource,
+	items: readonly (Prisma.InputJsonValue | null)[],
+	fetchedAt: Date,
+): Promise<(Prisma.InputJsonValue | null)[]> {
+	if (resource !== "orders" && resource !== "customers") return [...items];
+	const probes = items.map((item) =>
+		item === null ? null : probe(resource, item),
+	);
+	const ids = probes.flatMap((entry) => (entry ? [entry.id] : []));
+	if (!ids.length) return [...items];
+	const rows =
+		resource === "orders"
+			? (
+					await db.pancakeOrder.findMany({
+						where: { shopId, orderId: { in: ids } },
+						select: { orderId: true, sourceUpdatedAt: true, fetchedAt: true },
+					})
+				).map((row) => [row.orderId, row] as const)
+			: (
+					await db.pancakeCustomer.findMany({
+						where: { shopId, customerId: { in: ids } },
+						select: {
+							customerId: true,
+							sourceUpdatedAt: true,
+							fetchedAt: true,
+						},
+					})
+				).map((row) => [row.customerId, row] as const);
+	const known = new Map<
+		string,
+		{ sourceUpdatedAt: Date | null; fetchedAt: Date }
+	>(rows);
+	return items.filter((_, index) => {
+		const entry = probes[index];
+		if (!entry) return true;
+		return isNewer(known.get(entry.id) ?? null, entry.updated, fetchedAt);
+	});
 }
 
 function hash(value: string): string {

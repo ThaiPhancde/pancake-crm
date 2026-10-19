@@ -434,6 +434,16 @@ export async function orderDetail(
 	};
 }
 
+async function homeCurrencies(db: Db, shopIds: readonly string[]) {
+	return new Map(
+		await Promise.all(
+			[...new Set(shopIds)].map(
+				async (id) => [id, (await effectiveSettings(db, id)).currency] as const,
+			),
+		),
+	);
+}
+
 function spendAmounts(
 	groups: readonly {
 		currency: string;
@@ -500,6 +510,11 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 				: {},
 		],
 	};
+	const home = await homeCurrencies(
+		db,
+		selected.map((grant) => grant.shopId),
+	);
+	const homeSet = new Set(home.values());
 	const [rows, total, orderStats, repeatGroups] = await Promise.all([
 		db.pancakeCustomer.findMany({
 			where,
@@ -580,6 +595,7 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 	);
 	const spentByCustomer = new Map<string, ReturnType<typeof spendAmounts>>();
 	for (const g of spendGroups) {
+		if (g.currency !== home.get(g.shopId)) continue;
 		const key = `${g.shopId}:${g.customerId}`;
 		spentByCustomer.set(key, [
 			...(spentByCustomer.get(key) ?? []),
@@ -647,7 +663,9 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 		total,
 		summary: {
 			newContacts: total,
-			totalSpent: spendAmounts(orderStats),
+			totalSpent: spendAmounts(
+				orderStats.filter((group) => homeSet.has(group.currency)),
+			),
 			spendWindowDays: PANCAKE.spendWindowDays,
 			returningRate,
 			currency,
@@ -738,6 +756,8 @@ export async function customerDetail(
 		);
 	const orderCount = countStatuses(PANCAKE.bookedExcludedStatuses, false);
 	const deliveredCount = countStatuses(PANCAKE.receivedStatuses, true);
+	const homeCurrency = (await effectiveSettings(db, shopId)).currency;
+	const homeRecent = recent.filter((group) => group.currency === homeCurrency);
 	const empMeta = employee ? parseEmployeeMeta(employee.raw) : null;
 	const currency =
 		orders[0]?.currency ??
@@ -776,8 +796,8 @@ export async function customerDetail(
 		canWrite: canWrite(grants, shopId),
 		orderCount,
 		deliveredCount,
-		totalSpent: spendAmounts(recent),
-		recentOrderCount: recent.reduce((sum, g) => sum + g._count._all, 0),
+		totalSpent: spendAmounts(homeRecent),
+		recentOrderCount: homeRecent.reduce((sum, g) => sum + g._count._all, 0),
 		spendWindowDays: PANCAKE.spendWindowDays,
 		currency,
 		orders: orders.map(({ raw, ...ord }) => {
@@ -1184,6 +1204,10 @@ export async function dashboardReport(
 			received: Prisma.Decimal;
 		}
 	>();
+	const home = await homeCurrencies(
+		db,
+		groups.map((group) => group.shopId),
+	);
 	const booked = new Map<string, Prisma.Decimal>();
 	const bookedOrders = new Map<string, number>();
 	const collected = new Map<string, Prisma.Decimal>();
@@ -1197,11 +1221,12 @@ export async function dashboardReport(
 		const isBooked = !PANCAKE.bookedExcludedStatuses.includes(group.status);
 		const isCancelled = PANCAKE.cancelledStatuses.includes(group.status);
 		const isReturned = PANCAKE.returnedStatuses.includes(group.status);
+		const isHome = group.currency === home.get(group.shopId);
 		if (isReceived) {
 			delivered += group.orders;
-			addAmount(collected, group.currency, group.productValue);
+			if (isHome) addAmount(collected, group.currency, group.productValue);
 		}
-		if (isBooked) {
+		if (isBooked && isHome) {
 			addAmount(booked, group.currency, group.productValue);
 			bookedOrders.set(
 				group.currency,
@@ -1210,7 +1235,7 @@ export async function dashboardReport(
 		}
 		if (isCancelled) cancelled += group.orders;
 		if (isReturned) returned += group.orders;
-		const key = JSON.stringify([group.shopId, group.sellerId, group.currency]);
+		const key = JSON.stringify([group.shopId, group.sellerId]);
 		const row = performance.get(key) ?? {
 			shopId: group.shopId,
 			sellerId: group.sellerId,
@@ -1218,7 +1243,7 @@ export async function dashboardReport(
 			sellerAvatarUrl: group.sellerId
 				? (avatarMap.get(`${group.shopId}:${group.sellerId}`) ?? null)
 				: null,
-			currency: group.currency,
+			currency: home.get(group.shopId) ?? group.currency,
 			orders: 0,
 			delivered: 0,
 			cancelled: 0,
@@ -1229,9 +1254,9 @@ export async function dashboardReport(
 		row.orders += group.orders;
 		if (isReceived) {
 			row.delivered += group.orders;
-			row.received = row.received.add(group.productValue);
+			if (isHome) row.received = row.received.add(group.productValue);
 		}
-		if (isBooked) row.revenue = row.revenue.add(group.productValue);
+		if (isBooked && isHome) row.revenue = row.revenue.add(group.productValue);
 		if (isCancelled) row.cancelled += group.orders;
 		if (isReturned) row.returned += group.orders;
 		performance.set(key, row);
