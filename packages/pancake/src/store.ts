@@ -111,27 +111,50 @@ export async function storeRecord(
 		});
 		return true;
 	}
-	const item = orderWire.parse(value);
-	assertSourceShop(shopId, item.shop_id);
-	await entityLock(tx, shopId, resource, item.id);
-	const key = { shopId_orderId: { shopId, orderId: item.id } };
+	const prepared = prepareOrder(shopId, value, fetchedAt);
+	await entityLock(tx, shopId, resource, prepared.orderId);
+	const key = { shopId_orderId: { shopId, orderId: prepared.orderId } };
 	const current = await tx.pancakeOrder.findUnique({ where: key });
-	const updated = sourceDate(item.updated_at);
-	if (!isNewer(current, updated, fetchedAt)) return false;
-	if (item.customer) {
+	if (!isNewer(current, prepared.updated, fetchedAt)) return false;
+	if (prepared.stub)
 		await tx.pancakeCustomer.upsert({
-			where: { shopId_customerId: { shopId, customerId: item.customer.id } },
-			create: {
-				shopId,
-				customerId: item.customer.id,
-				name: item.customer.name ?? item.bill_full_name ?? "Khách hàng",
-				phone: item.bill_phone_number ?? null,
-				fetchedAt: new Date(0),
-				raw: {},
+			where: {
+				shopId_customerId: { shopId, customerId: prepared.stub.customerId },
 			},
+			create: prepared.stub,
 			update: {},
 		});
-	}
+	await tx.pancakeOrder.upsert({
+		where: key,
+		create: { shopId, orderId: prepared.orderId, ...prepared.data },
+		update: prepared.data,
+	});
+	const history = orderHistory(shopId, prepared, current);
+	if (history.length)
+		await tx.pancakeOrderHistory.createMany({
+			data: history,
+			skipDuplicates: true,
+		});
+	return true;
+}
+
+type OrderCurrent = {
+	status: number;
+	subStatus: number | null;
+	deliveryStatus: string | null;
+	trackingCode: string | null;
+	sourceUpdatedAt: Date | null;
+	fetchedAt: Date;
+};
+
+function prepareOrder(
+	shopId: string,
+	value: Prisma.InputJsonValue,
+	fetchedAt: Date,
+) {
+	const item = orderWire.parse(value);
+	assertSourceShop(shopId, item.shop_id);
+	const updated = sourceDate(item.updated_at);
 	const deliveryStatus = shippingStatus(item);
 	const currency =
 		item.order_currency ?? PANCAKE.shopCurrency.get(shopId) ?? "VND";
@@ -159,18 +182,34 @@ export async function storeRecord(
 		fetchedAt,
 		raw: value,
 	};
-	await tx.pancakeOrder.upsert({
-		where: key,
-		create: { shopId, orderId: item.id, ...data },
-		update: data,
-	});
+	const stub = item.customer
+		? {
+				shopId,
+				customerId: item.customer.id,
+				name: item.customer.name ?? item.bill_full_name ?? "Khách hàng",
+				phone: item.bill_phone_number ?? null,
+				fetchedAt: new Date(0),
+				raw: {},
+			}
+		: null;
+	return { item, orderId: item.id, updated, data, stub };
+}
+
+type PreparedOrder = ReturnType<typeof prepareOrder>;
+
+function orderHistory(
+	shopId: string,
+	prepared: PreparedOrder,
+	current: OrderCurrent | null,
+): Prisma.PancakeOrderHistoryCreateManyInput[] {
+	const { item, orderId, data, updated } = prepared;
 	const history: Prisma.PancakeOrderHistoryCreateManyInput[] = [];
 	for (const event of item.status_history ?? []) {
 		const occurredAt = event.updated_at ?? event.inserted_at;
 		if (!occurredAt) continue;
 		history.push({
 			shopId,
-			orderId: item.id,
+			orderId,
 			eventKey: hash(
 				`${event.status}:${event.old_status}:${occurredAt}:${event.editor_id ?? ""}`,
 			),
@@ -190,26 +229,101 @@ export async function storeRecord(
 	) {
 		history.push({
 			shopId,
-			orderId: item.id,
+			orderId,
 			eventKey: hash(
-				`snapshot:${item.updated_at}:${data.status}:${data.subStatus}:${deliveryStatus}:${data.trackingCode}`,
+				`snapshot:${item.updated_at}:${data.status}:${data.subStatus}:${data.deliveryStatus}:${data.trackingCode}`,
 			),
 			oldStatus: current?.status ?? null,
 			status: data.status,
 			subStatus: data.subStatus,
-			deliveryStatus,
+			deliveryStatus: data.deliveryStatus,
 			trackingCode: data.trackingCode,
 			actorId: data.lastEditorId,
 			occurredAt: updated,
 			source: "poll-snapshot",
 		});
 	}
+	return history;
+}
+
+export async function storeOrders(
+	tx: Prisma.TransactionClient,
+	shopId: string,
+	values: readonly Prisma.InputJsonValue[],
+	fetchedAt: Date,
+): Promise<number> {
+	const byId = new Map<string, PreparedOrder>();
+	for (const value of values) {
+		const prepared = prepareOrder(shopId, value, fetchedAt);
+		const previous = byId.get(prepared.orderId);
+		if (
+			!previous?.updated ||
+			(prepared.updated && prepared.updated >= previous.updated)
+		)
+			byId.set(prepared.orderId, prepared);
+	}
+	if (!byId.size) return 0;
+	await entityLock(tx, shopId, "orders", "page");
+	const existing = new Map(
+		(
+			await tx.pancakeOrder.findMany({
+				where: { shopId, orderId: { in: [...byId.keys()] } },
+				select: {
+					orderId: true,
+					status: true,
+					subStatus: true,
+					deliveryStatus: true,
+					trackingCode: true,
+					sourceUpdatedAt: true,
+					fetchedAt: true,
+				},
+			})
+		).map((row) => [row.orderId, row] as const),
+	);
+	const todo = [...byId.values()].filter((prepared) =>
+		isNewer(
+			existing.get(prepared.orderId) ?? null,
+			prepared.updated,
+			fetchedAt,
+		),
+	);
+	if (!todo.length) return 0;
+	const stubs = new Map(
+		todo.flatMap((prepared) =>
+			prepared.stub ? [[prepared.stub.customerId, prepared.stub] as const] : [],
+		),
+	);
+	if (stubs.size)
+		await tx.pancakeCustomer.createMany({
+			data: [...stubs.values()],
+			skipDuplicates: true,
+		});
+	const fresh = todo.filter((prepared) => !existing.has(prepared.orderId));
+	if (fresh.length)
+		await tx.pancakeOrder.createMany({
+			data: fresh.map((prepared) => ({
+				shopId,
+				orderId: prepared.orderId,
+				...prepared.data,
+			})),
+			skipDuplicates: true,
+		});
+	for (const prepared of todo) {
+		if (!existing.has(prepared.orderId)) continue;
+		await tx.pancakeOrder.update({
+			where: { shopId_orderId: { shopId, orderId: prepared.orderId } },
+			data: prepared.data,
+		});
+	}
+	const history = todo.flatMap((prepared) =>
+		orderHistory(shopId, prepared, existing.get(prepared.orderId) ?? null),
+	);
 	if (history.length)
 		await tx.pancakeOrderHistory.createMany({
 			data: history,
 			skipDuplicates: true,
 		});
-	return true;
+	return todo.length;
 }
 
 type Probe = { id: string; updated: Date | null };

@@ -1,4 +1,4 @@
-import type { Db, PancakeShopModel } from "@crm/db";
+import type { Db, PancakeShopModel, Prisma } from "@crm/db";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
 import {
 	PancakeApiError,
@@ -7,7 +7,7 @@ import {
 	pageComplete,
 } from "./client";
 import { assertCrmDatabase, PANCAKE, RESOURCES, type Resource } from "./config";
-import { changedRecords, storeRecord } from "./store";
+import { changedRecords, storeOrders, storeRecord } from "./store";
 
 export function assertLiveAllowed(
 	shop: Pick<
@@ -23,6 +23,25 @@ export function assertLiveAllowed(
 	) {
 		throw new PancakeApiError("LIVE_SYNC_LOCKED");
 	}
+}
+
+async function storePage(
+	tx: Prisma.TransactionClient,
+	shopId: string,
+	resource: Resource,
+	items: readonly (Prisma.InputJsonValue | null)[],
+	fetchedAt: Date,
+): Promise<number> {
+	const records: Prisma.InputJsonValue[] = [];
+	for (const item of items) {
+		if (item === null) throw new PancakeApiError("INVALID_RECORD");
+		records.push(item);
+	}
+	if (resource === "orders") return storeOrders(tx, shopId, records, fetchedAt);
+	let written = 0;
+	for (const record of records)
+		if (await storeRecord(tx, shopId, resource, record, fetchedAt)) written++;
+	return written;
 }
 
 export async function syncResource(
@@ -105,12 +124,7 @@ export async function syncResource(
 		);
 		const committed = await db.$transaction(
 			async (tx) => {
-				let written = 0;
-				for (const item of fresh) {
-					if (item === null) throw new PancakeApiError("INVALID_RECORD");
-					if (await storeRecord(tx, shopId, resource, item, fetchedAt))
-						written++;
-				}
+				const written = await storePage(tx, shopId, resource, fresh, fetchedAt);
 				const advanced = await tx.pancakeSyncCursor.updateMany({
 					where: {
 						shopId,
@@ -178,12 +192,7 @@ export async function syncRecent(
 		);
 		const written = await db.$transaction(
 			async (tx) => {
-				let count = 0;
-				for (const item of fresh) {
-					if (item === null) throw new PancakeApiError("INVALID_RECORD");
-					if (await storeRecord(tx, shopId, resource, item, fetchedAt)) count++;
-				}
-				return count;
+				return storePage(tx, shopId, resource, fresh, fetchedAt);
 			},
 			{ timeout: PANCAKE.transactionMs },
 		);
