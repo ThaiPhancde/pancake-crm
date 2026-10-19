@@ -100,6 +100,7 @@ Từ 2 ảnh chụp log Vercel lúc `09:15:45` – `09:16:10` (ngay thời đi�
 - `apps/app/components/shop/shell.tsx`, `workspace-picker.tsx`: `prefetch={false}` trên mọi `<Link>` điều hướng shop.
 - `apps/app/lib/session.ts`: `getSession` thử lại khi API trả 5xx (300ms, 600ms). Nếu vẫn lỗi, throw lỗi thay vì trả `null`, nên người dùng không bị đá về `/sign-in`.
 - `packages/db/src/client.ts`: pool `max: 2` (local `3`), `idleTimeoutMillis: 2_000` trên serverless. Layerbase `max_client_conn` = 20, nên tổng instance x 2 phải dưới 20. Không dùng `max: 1` vì có hơn 60 `db.$transaction(async ...)` và Fluid compute cho nhiều request chạy trong một instance.
+- `packages/db/src/client.ts`: `transactionOptions` `maxWait: 10_000`, `timeout: 15_000`, để transaction chờ kết nối khi pool đầy thay vì lỗi `P2028` sau 2 giây. Đã rà mọi `$transaction` trong `apps/api`, `packages/auth`, `packages/db`, `packages/pancake`, `packages/telemetry`: không nơi nào gọi `db` bên trong `tx`.
 - `cookieCache` của Better Auth đã bật từ trước (5 phút). Mục "Nothing is cached in a cookie" trong `docs/api.md` nói về cookie đánh dấu của `proxy.ts`, không mâu thuẫn.
 
 ### Việc thủ công cần làm trên Vercel

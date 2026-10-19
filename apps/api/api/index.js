@@ -286685,7 +286685,8 @@ var createPrismaClient = () => {
       idleTimeoutMillis: isServerless ? 2000 : 5000,
       connectionTimeoutMillis: 15000
     }),
-    log: logDefinitions
+    log: logDefinitions,
+    transactionOptions: { maxWait: 1e4, timeout: 15000 }
   });
   client.$on("error", ({ message: message2, target }) => {
     sink({ level: "error", message: message2, target });

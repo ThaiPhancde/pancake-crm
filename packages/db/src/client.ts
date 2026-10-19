@@ -109,6 +109,7 @@ const createPrismaClient = () => {
 			connectionTimeoutMillis: 15_000,
 		}),
 		log: logDefinitions,
+		transactionOptions: { maxWait: 10_000, timeout: 15_000 },
 	});
 
 	client.$on("error", ({ message, target }) => {
