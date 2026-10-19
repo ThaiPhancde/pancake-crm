@@ -104,7 +104,7 @@ const createPrismaClient = () => {
 	const client = new PrismaClient({
 		adapter: new PrismaPg({
 			connectionString,
-			max: 3,
+			max: isServerless ? 2 : 3,
 			idleTimeoutMillis: isServerless ? 2_000 : 5_000,
 			connectionTimeoutMillis: 15_000,
 		}),

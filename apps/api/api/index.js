@@ -286681,7 +286681,7 @@ var createPrismaClient = () => {
   const client = new PrismaClient({
     adapter: new PrismaPgAdapterFactory({
       connectionString,
-      max: 3,
+      max: isServerless ? 2 : 3,
       idleTimeoutMillis: isServerless ? 2000 : 5000,
       connectionTimeoutMillis: 15000
     }),
