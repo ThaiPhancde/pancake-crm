@@ -319568,11 +319568,11 @@ var PERMISSION_DEFAULTS = [
   { name: "Chỉ xem", actions: ["view"], skip: ["settings"] }
 ];
 var RESOURCES = [
-  "employees",
   "orders",
+  "returns",
   "products",
-  "customers",
-  "returns"
+  "employees",
+  "customers"
 ];
 var STATUS_NAMES = new Map([
   [0, "Mới"],

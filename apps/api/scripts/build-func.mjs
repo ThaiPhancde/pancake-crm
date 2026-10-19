@@ -210,7 +210,11 @@ if (!process.env.VERCEL || process.env.SKIP_BUILD_MIGRATIONS === "1") {
 	console.log("• no database URL at build time — skipping migrations");
 } else {
 	const dbDir = join(repoRoot, "packages/db");
-	const dbEnv = { ...process.env, DATABASE_URL: directDatabaseUrl };
+	const dbEnv = {
+		...process.env,
+		DATABASE_URL: directDatabaseUrl,
+		PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK: "1",
+	};
 
 	try {
 		console.log("• applying migrations (prisma migrate deploy)...");

@@ -143,11 +143,11 @@ export const PERMISSION_DEFAULTS = [
 ] as const;
 
 export const RESOURCES = [
-	"employees",
 	"orders",
-	"products",
-	"customers",
 	"returns",
+	"products",
+	"employees",
+	"customers",
 ] as const;
 export type Resource = (typeof RESOURCES)[number];
 
