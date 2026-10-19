@@ -1,5 +1,10 @@
 import "server-only";
-import { createTRPCClient, httpBatchLink, type TRPCClient } from "@trpc/client";
+import {
+	createTRPCClient,
+	httpBatchLink,
+	retryLink,
+	type TRPCClient,
+} from "@trpc/client";
 import {
 	createTRPCOptionsProxy,
 	type TRPCOptionsProxy,
@@ -12,11 +17,25 @@ import { makeQueryClient } from "./query-client";
 
 export const getServerQueryClient = cache(makeQueryClient);
 
-export function getServerTrpcClient(): TRPCClient<AppRouter> {
+export const getServerTrpcClient = cache((): TRPCClient<AppRouter> => {
 	return createTRPCClient<AppRouter>({
 		links: [
+			retryLink({
+				retry(opts) {
+					if (opts.op.type !== "query") return false;
+					if (
+						opts.error.data &&
+						opts.error.data.code !== "INTERNAL_SERVER_ERROR"
+					) {
+						return false;
+					}
+					return opts.attempts <= 2;
+				},
+				retryDelayMs: (attemptIndex) => attemptIndex * 250,
+			}),
 			httpBatchLink({
 				url: `${API_URL}/api/trpc`,
+				maxItems: 4,
 				headers: async () => {
 					const cookie = (await cookies()).toString();
 					return cookie ? { cookie } : {};
@@ -24,7 +43,7 @@ export function getServerTrpcClient(): TRPCClient<AppRouter> {
 			}),
 		],
 	});
-}
+});
 
 export function getServerTrpc(): TRPCOptionsProxy<AppRouter> {
 	const client = getServerTrpcClient();

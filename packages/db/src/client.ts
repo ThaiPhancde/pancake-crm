@@ -98,9 +98,16 @@ const logDefinitions: Prisma.LogDefinition[] = [
 		: []),
 ];
 
+const isServerless = Boolean(process.env.VERCEL);
+
 const createPrismaClient = () => {
 	const client = new PrismaClient({
-		adapter: new PrismaPg({ connectionString }),
+		adapter: new PrismaPg({
+			connectionString,
+			max: isServerless ? 2 : 3,
+			idleTimeoutMillis: 5_000,
+			connectionTimeoutMillis: 15_000,
+		}),
 		log: logDefinitions,
 	});
 
@@ -125,9 +132,6 @@ declare global {
 }
 
 export const db = globalThis.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-	globalThis.prisma = db;
-}
+globalThis.prisma = db;
 
 export type Db = typeof db;

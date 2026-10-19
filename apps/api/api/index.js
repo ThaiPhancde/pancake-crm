@@ -286676,9 +286676,15 @@ var logDefinitions = [
     { level: "info", emit: "event" }
   ] : []
 ];
+var isServerless = Boolean(process.env.VERCEL);
 var createPrismaClient = () => {
   const client = new PrismaClient({
-    adapter: new PrismaPgAdapterFactory({ connectionString }),
+    adapter: new PrismaPgAdapterFactory({
+      connectionString,
+      max: isServerless ? 2 : 3,
+      idleTimeoutMillis: 5000,
+      connectionTimeoutMillis: 15000
+    }),
     log: logDefinitions
   });
   client.$on("error", ({ message: message2, target }) => {
@@ -286696,9 +286702,7 @@ var createPrismaClient = () => {
   return client;
 };
 var db3 = globalThis.prisma ?? createPrismaClient();
-if (true) {
-  globalThis.prisma = db3;
-}
+globalThis.prisma = db3;
 // ../../packages/validation/src/activity-meta.ts
 init_zod();
 var exports_activity_meta = {};
@@ -288992,7 +288996,7 @@ var auth = betterAuth({
   },
   rateLimit: {
     enabled: true,
-    storage: "database"
+    storage: "memory"
   },
   advanced: {
     cookiePrefix: AUTH_COOKIE_PREFIX,
@@ -293431,8 +293435,21 @@ SessionOnlyMiddleware = __legacyDecorateClassTS([
 
 // src/trpc/trpc.context.ts
 var import_common7 = __toESM(require_common(), 1);
+var requestSessions = new WeakMap;
+async function resolveRequestSession(req) {
+  const existing = requestSessions.get(req);
+  if (existing)
+    return existing;
+  const headers = fromNodeHeaders(req.headers);
+  const lookup = auth.api.getSession({ headers }).catch(async () => {
+    await new Promise((resolve2) => setTimeout(resolve2, 120));
+    return auth.api.getSession({ headers });
+  }).catch(() => null);
+  requestSessions.set(req, lookup);
+  return lookup;
+}
 async function createBaseTrpcContext(req) {
-  const session = req ? await auth.api.getSession({ headers: fromNodeHeaders(req.headers) }).catch(() => null) : null;
+  const session = req ? await resolveRequestSession(req) : null;
   return { req, session };
 }
 
@@ -319347,7 +319364,16 @@ class PancakeAccessError extends Error {
     this.name = "PancakeAccessError";
   }
 }
-async function shopGrants(db4, userId) {
+var GRANTS_TTL_MS = 5000;
+var grantsCache = new Map;
+function clearShopGrantsCache(userId) {
+  if (userId) {
+    grantsCache.delete(userId);
+  } else {
+    grantsCache.clear();
+  }
+}
+async function fetchShopGrants(db4, userId) {
   const member = await db4.member.findUnique({
     where: { organizationId_userId: { organizationId: "workspace", userId } },
     select: { role: true }
@@ -319361,6 +319387,20 @@ async function shopGrants(db4, userId) {
     where: { userId },
     select: { shopId: true, role: true, employeeId: true }
   });
+}
+async function shopGrants(db4, userId) {
+  if (false) {}
+  const now2 = Date.now();
+  const cached5 = grantsCache.get(userId);
+  if (cached5 && cached5.expiresAt > now2) {
+    return cached5.promise;
+  }
+  const promise2 = fetchShopGrants(db4, userId).catch((error53) => {
+    grantsCache.delete(userId);
+    throw error53;
+  });
+  grantsCache.set(userId, { expiresAt: now2 + GRANTS_TTL_MS, promise: promise2 });
+  return promise2;
 }
 function orderScope(grants, requestedShop) {
   if (requestedShop && !grants.some((grant) => grant.shopId === requestedShop))
@@ -319517,7 +319557,7 @@ async function listTasks(db4, userId, input2, now2 = new Date) {
       }
     ] : undefined
   };
-  const [rows, total, overdue] = await db4.$transaction([
+  const [rows, total, overdue] = await Promise.all([
     db4.pancakeTask.findMany({
       where,
       select: {
@@ -319650,7 +319690,7 @@ var orderSelect = {
 async function listOrders(db4, userId, input2) {
   const scope = orderScope(await shopGrants(db4, userId), input2.shopId);
   const where = filteredOrders(scope, input2);
-  const [rows, total] = await db4.$transaction([
+  const [rows, total] = await Promise.all([
     db4.pancakeOrder.findMany({
       where,
       select: { ...orderSelect, raw: true },
@@ -320051,7 +320091,7 @@ async function customerPurchases(db4, userId, shopId, customerId, input2) {
   const tail = phoneTail(customer.phone, PANCAKE.shopDialCode.get(shopId));
   const person = tail ? { customerPhone: { endsWith: tail } } : { customerId };
   const where = filteredOrders({ AND: [scope, person] }, { ...input2, shopId });
-  const [rows, total] = await db4.$transaction([
+  const [rows, total] = await Promise.all([
     db4.pancakeOrder.findMany({
       where,
       select: orderSelect,
@@ -320083,7 +320123,7 @@ async function listProducts(db4, userId, input2) {
       { productId: { contains: input2.q } }
     ] : undefined
   };
-  const [rows, total] = await db4.$transaction([
+  const [rows, total] = await Promise.all([
     db4.pancakeProduct.findMany({
       where,
       select: {
@@ -320381,7 +320421,7 @@ async function setMembership(db4, userId, input2) {
     }
   }))
     throw new PancakeAccessError;
-  return db4.pancakeShopMember.upsert({
+  const result = await db4.pancakeShopMember.upsert({
     where: { shopId_userId: { shopId: input2.shopId, userId: input2.userId } },
     create: {
       shopId: input2.shopId,
@@ -320392,6 +320432,8 @@ async function setMembership(db4, userId, input2) {
     update: { role: input2.role, employeeId: input2.employeeId ?? null },
     select: { shopId: true, userId: true, role: true, employeeId: true }
   });
+  clearShopGrantsCache(input2.userId);
+  return result;
 }
 async function approveEmployee(db4, userId, input2) {
   await assertShopManager(db4, userId, input2.shopId);
@@ -320438,7 +320480,7 @@ async function approveEmployee(db4, userId, input2) {
     },
     update: {}
   });
-  return db4.pancakeShopMember.upsert({
+  const result = await db4.pancakeShopMember.upsert({
     where: {
       shopId_userId: { shopId: input2.shopId, userId: targetUser.id }
     },
@@ -320454,6 +320496,8 @@ async function approveEmployee(db4, userId, input2) {
     },
     select: { shopId: true, userId: true, role: true, employeeId: true }
   });
+  clearShopGrantsCache(targetUser.id);
+  return result;
 }
 async function approveAllEmployees(db4, userId, shopId) {
   await assertShopManager(db4, userId, shopId);
@@ -320525,7 +320569,7 @@ async function listLeads(db4, userId, input2) {
       { email: { contains: input2.q, mode: "insensitive" } }
     ] : undefined
   };
-  const [rows, total] = await db4.$transaction([
+  const [rows, total] = await Promise.all([
     db4.pancakeLead.findMany({
       where,
       orderBy: { createdAt: "desc" },
@@ -320588,7 +320632,7 @@ async function listAppointments(db4, userId, input2) {
       { phone: { contains: input2.q } }
     ] : undefined
   };
-  const [rows, total] = await db4.$transaction([
+  const [rows, total] = await Promise.all([
     db4.pancakeAppointment.findMany({
       where,
       orderBy: { startAt: "desc" },
@@ -320651,7 +320695,7 @@ async function listTickets(db4, userId, input2) {
       { orderId: { contains: input2.q } }
     ] : undefined
   };
-  const [rows, total] = await db4.$transaction([
+  const [rows, total] = await Promise.all([
     db4.pancakeTicket.findMany({
       where,
       orderBy: { createdAt: "desc" },

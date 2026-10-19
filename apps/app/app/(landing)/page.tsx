@@ -8,18 +8,18 @@ import { workspaceUrl } from "@/lib/workspace-url";
 
 async function resolveWorkspaceSlug(): Promise<string | null> {
 	try {
+		const workspace = await getServerTrpcClient().workspace.get.query();
+		if (workspace.slug) return workspace.slug;
+	} catch {
+		// Fall back to local DB workspace lookup when API server is not reachable
+	}
+
+	try {
 		const workspace = await db.organization.findUnique({
 			where: { id: WORKSPACE_ID },
 			select: { slug: true },
 		});
-		if (workspace?.slug) return workspace.slug;
-	} catch {
-		// Fall through to remote API workspace lookup
-	}
-
-	try {
-		const workspace = await getServerTrpcClient().workspace.get.query();
-		return workspace.slug;
+		return workspace?.slug ?? null;
 	} catch {
 		return null;
 	}

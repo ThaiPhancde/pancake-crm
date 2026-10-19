@@ -5,14 +5,34 @@ import type { Request } from "express";
 import type { ContextOptions, TRPCContext } from "nestjs-trpc";
 import type { BaseTrpcContext } from "./context.types";
 
+const requestSessions = new WeakMap<
+	Request,
+	Promise<BaseTrpcContext["session"]>
+>();
+
+async function resolveRequestSession(
+	req: Request,
+): Promise<BaseTrpcContext["session"]> {
+	const existing = requestSessions.get(req);
+	if (existing) return existing;
+
+	const headers = fromNodeHeaders(req.headers);
+	const lookup = auth.api
+		.getSession({ headers })
+		.catch(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 120));
+			return auth.api.getSession({ headers });
+		})
+		.catch(() => null);
+
+	requestSessions.set(req, lookup);
+	return lookup;
+}
+
 export async function createBaseTrpcContext(
 	req: Request | undefined,
 ): Promise<BaseTrpcContext> {
-	const session = req
-		? await auth.api
-				.getSession({ headers: fromNodeHeaders(req.headers) })
-				.catch(() => null)
-		: null;
+	const session = req ? await resolveRequestSession(req) : null;
 	return { req, session };
 }
 

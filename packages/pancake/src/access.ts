@@ -13,7 +13,21 @@ export type ShopGrant = {
 	employeeId: string | null;
 };
 
-export async function shopGrants(db: Db, userId: string): Promise<ShopGrant[]> {
+const GRANTS_TTL_MS = 5_000;
+const grantsCache = new Map<
+	string,
+	{ expiresAt: number; promise: Promise<ShopGrant[]> }
+>();
+
+export function clearShopGrantsCache(userId?: string): void {
+	if (userId) {
+		grantsCache.delete(userId);
+	} else {
+		grantsCache.clear();
+	}
+}
+
+async function fetchShopGrants(db: Db, userId: string): Promise<ShopGrant[]> {
 	const member = await db.member.findUnique({
 		where: { organizationId_userId: { organizationId: "workspace", userId } },
 		select: { role: true },
@@ -28,6 +42,23 @@ export async function shopGrants(db: Db, userId: string): Promise<ShopGrant[]> {
 		where: { userId },
 		select: { shopId: true, role: true, employeeId: true },
 	});
+}
+
+export async function shopGrants(db: Db, userId: string): Promise<ShopGrant[]> {
+	if (process.env.NODE_ENV === "test") {
+		return fetchShopGrants(db, userId);
+	}
+	const now = Date.now();
+	const cached = grantsCache.get(userId);
+	if (cached && cached.expiresAt > now) {
+		return cached.promise;
+	}
+	const promise = fetchShopGrants(db, userId).catch((error) => {
+		grantsCache.delete(userId);
+		throw error;
+	});
+	grantsCache.set(userId, { expiresAt: now + GRANTS_TTL_MS, promise });
+	return promise;
 }
 
 export function orderScope(

@@ -171,7 +171,7 @@ export async function listTasks(
 				]
 			: undefined,
 	};
-	const [rows, total, overdue] = await db.$transaction([
+	const [rows, total, overdue] = await Promise.all([
 		db.pancakeTask.findMany({
 			where,
 			select: {

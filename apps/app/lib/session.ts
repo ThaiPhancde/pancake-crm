@@ -19,24 +19,23 @@ const serverAuthClient = createAuthClient({
 
 export const getSession = cache(async (): Promise<Session | null> => {
 	const reqHeaders = await headers();
-	try {
-		const local = await auth.api.getSession({ headers: reqHeaders });
-		if (local) return local;
-	} catch {
-		// Fall through to remote API session lookup
-	}
-
 	const cookie = reqHeaders.get("cookie");
 	if (!cookie) return null;
 
 	try {
-		const { data } = await serverAuthClient.getSession({
+		const { data, error } = await serverAuthClient.getSession({
 			fetchOptions: {
 				headers: { cookie },
 				cache: "no-store",
 			},
 		});
-		return data ?? null;
+		if (!error) return data ?? null;
+	} catch {
+		// Fall back to local auth lookup when API server is not reachable (e.g. unit tests)
+	}
+
+	try {
+		return await auth.api.getSession({ headers: reqHeaders });
 	} catch {
 		return null;
 	}
@@ -54,32 +53,32 @@ export async function requireSession(): Promise<Session> {
 
 export const signInAccounts = cache(
 	async (userId: string): Promise<SignInAccount[]> => {
+		const reqHeaders = await headers();
+		const cookie = reqHeaders.get("cookie");
+		if (cookie) {
+			try {
+				const { data, error } = await serverAuthClient.listAccounts({
+					fetchOptions: {
+						headers: { cookie },
+						cache: "no-store",
+					},
+				});
+				if (!error && data) {
+					return data.map((account) => ({
+						providerId: account.providerId,
+						scope: account.scopes.join(" "),
+					}));
+				}
+			} catch {
+				// Fall back to local DB lookup when API server is not reachable
+			}
+		}
+
 		try {
-			const rows = await db.account.findMany({
+			return await db.account.findMany({
 				where: { userId },
 				select: { providerId: true, scope: true },
 			});
-			if (rows.length > 0) return rows;
-		} catch {
-			// Fall through to remote API account lookup
-		}
-
-		const reqHeaders = await headers();
-		const cookie = reqHeaders.get("cookie");
-		if (!cookie) return [];
-
-		try {
-			const { data } = await serverAuthClient.listAccounts({
-				fetchOptions: {
-					headers: { cookie },
-					cache: "no-store",
-				},
-			});
-			if (!data) return [];
-			return data.map((account) => ({
-				providerId: account.providerId,
-				scope: account.scopes.join(" "),
-			}));
 		} catch {
 			return [];
 		}

@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
 	assertShopManager,
 	assertWorkspaceAdmin,
+	clearShopGrantsCache,
 	orderScope,
 	PancakeAccessError,
 	shopGrants,
@@ -116,7 +117,7 @@ const orderSelect = {
 export async function listOrders(db: Db, userId: string, input: ListInput) {
 	const scope = orderScope(await shopGrants(db, userId), input.shopId);
 	const where = filteredOrders(scope, input);
-	const [rows, total] = await db.$transaction([
+	const [rows, total] = await Promise.all([
 		db.pancakeOrder.findMany({
 			where,
 			select: { ...orderSelect, raw: true },
@@ -642,7 +643,7 @@ export async function customerPurchases(
 	const tail = phoneTail(customer.phone, PANCAKE.shopDialCode.get(shopId));
 	const person = tail ? { customerPhone: { endsWith: tail } } : { customerId };
 	const where = filteredOrders({ AND: [scope, person] }, { ...input, shopId });
-	const [rows, total] = await db.$transaction([
+	const [rows, total] = await Promise.all([
 		db.pancakeOrder.findMany({
 			where,
 			select: orderSelect,
@@ -677,7 +678,7 @@ export async function listProducts(db: Db, userId: string, input: ListInput) {
 				]
 			: undefined,
 	};
-	const [rows, total] = await db.$transaction([
+	const [rows, total] = await Promise.all([
 		db.pancakeProduct.findMany({
 			where,
 			select: {
@@ -1048,7 +1049,7 @@ export async function setMembership(
 		}))
 	)
 		throw new PancakeAccessError();
-	return db.pancakeShopMember.upsert({
+	const result = await db.pancakeShopMember.upsert({
 		where: { shopId_userId: { shopId: input.shopId, userId: input.userId } },
 		create: {
 			shopId: input.shopId,
@@ -1059,6 +1060,8 @@ export async function setMembership(
 		update: { role: input.role, employeeId: input.employeeId ?? null },
 		select: { shopId: true, userId: true, role: true, employeeId: true },
 	});
+	clearShopGrantsCache(input.userId);
+	return result;
 }
 
 export async function approveEmployee(
@@ -1113,7 +1116,7 @@ export async function approveEmployee(
 		},
 		update: {},
 	});
-	return db.pancakeShopMember.upsert({
+	const result = await db.pancakeShopMember.upsert({
 		where: {
 			shopId_userId: { shopId: input.shopId, userId: targetUser.id },
 		},
@@ -1129,6 +1132,8 @@ export async function approveEmployee(
 		},
 		select: { shopId: true, userId: true, role: true, employeeId: true },
 	});
+	clearShopGrantsCache(targetUser.id);
+	return result;
 }
 
 export async function approveAllEmployees(
@@ -1219,7 +1224,7 @@ export async function listLeads(
 				]
 			: undefined,
 	};
-	const [rows, total] = await db.$transaction([
+	const [rows, total] = await Promise.all([
 		db.pancakeLead.findMany({
 			where,
 			orderBy: { createdAt: "desc" },
@@ -1292,7 +1297,7 @@ export async function listAppointments(
 				]
 			: undefined,
 	};
-	const [rows, total] = await db.$transaction([
+	const [rows, total] = await Promise.all([
 		db.pancakeAppointment.findMany({
 			where,
 			orderBy: { startAt: "desc" },
@@ -1367,7 +1372,7 @@ export async function listTickets(
 				]
 			: undefined,
 	};
-	const [rows, total] = await db.$transaction([
+	const [rows, total] = await Promise.all([
 		db.pancakeTicket.findMany({
 			where,
 			orderBy: { createdAt: "desc" },
