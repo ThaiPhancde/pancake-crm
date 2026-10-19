@@ -319451,6 +319451,8 @@ var PANCAKE = {
   recentPageBudget: 20,
   transactionMs: 600000,
   syncLeaseMs: 900000,
+  workerRestartCode: "WORKER_RESTART",
+  orderRawDrop: ["histories"],
   webhookMaxBytes: 1048576,
   webhookMaxAttempts: 8,
   webhookBatch: 25,
@@ -319567,9 +319569,9 @@ var PERMISSION_DEFAULTS = [
 ];
 var RESOURCES = [
   "employees",
-  "customers",
-  "products",
   "orders",
+  "products",
+  "customers",
   "returns"
 ];
 var STATUS_NAMES = new Map([
@@ -325317,6 +325319,10 @@ class PancakeApiError extends Error {
     this.name = "PancakeApiError";
   }
 }
+
+// ../../packages/pancake/src/store.ts
+init_zod();
+var rawObject = exports_external.record(exports_external.string(), exports_external.json());
 
 // ../../packages/pancake/src/sync.ts
 function assertLiveAllowed(shop) {

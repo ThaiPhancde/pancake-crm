@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Db, Prisma } from "@crm/db";
+import { z } from "zod";
 import { PANCAKE, type Resource } from "./config";
 import {
 	customerWire,
@@ -180,7 +181,7 @@ function prepareOrder(
 		sourceCreatedAt: sourceDate(item.inserted_at),
 		sourceUpdatedAt: updated,
 		fetchedAt,
-		raw: value,
+		raw: compactOrderRaw(value),
 	};
 	const stub = item.customer
 		? {
@@ -193,6 +194,18 @@ function prepareOrder(
 			}
 		: null;
 	return { item, orderId: item.id, updated, data, stub };
+}
+
+const rawObject = z.record(z.string(), z.json());
+
+function compactOrderRaw(value: Prisma.InputJsonValue): Prisma.InputJsonValue {
+	const parsed = rawObject.safeParse(value);
+	if (!parsed.success) return value;
+	return Object.fromEntries(
+		Object.entries(parsed.data).filter(
+			([key]) => !PANCAKE.orderRawDrop.includes(key),
+		),
+	);
 }
 
 type PreparedOrder = ReturnType<typeof prepareOrder>;
