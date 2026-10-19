@@ -24,7 +24,30 @@ export type CalendarEvent = {
 	date: string;
 	start: string;
 	end: string;
+	href?: string;
 };
+
+function EventChip({
+	event,
+	className,
+	children,
+}: {
+	event: CalendarEvent;
+	className: string;
+	children: React.ReactNode;
+}) {
+	if (!event.href) return <div className={className}>{children}</div>;
+	return (
+		<Link
+			href={event.href}
+			scroll={false}
+			title={event.title}
+			className={cn("block hover:bg-primary/15", className)}
+		>
+			{children}
+		</Link>
+	);
+}
 
 function parse(date: string): Date {
 	return new Date(`${date}T00:00:00Z`);
@@ -189,12 +212,13 @@ export function CalendarGrid({
 										Number(event.start.slice(0, 2)) === hour,
 								)
 								.map((event) => (
-									<div
+									<EventChip
 										key={event.id}
-										className="absolute inset-x-1 top-0.5 rounded-sm bg-accent px-1.5 py-0.5 text-[11px] text-accent-foreground"
+										event={event}
+										className="absolute inset-x-1 top-0.5 truncate rounded-sm bg-accent px-1.5 py-0.5 text-[11px] text-accent-foreground"
 									>
 										{event.start} {event.title}
-									</div>
+									</EventChip>
 								))}
 						</div>
 					))}
@@ -248,12 +272,13 @@ function MonthGrid({
 						{events
 							.filter((event) => event.date === key)
 							.map((event) => (
-								<div
+								<EventChip
 									key={event.id}
+									event={event}
 									className="mt-1 truncate rounded-sm bg-accent px-1 text-accent-foreground"
 								>
 									{event.title}
-								</div>
+								</EventChip>
 							))}
 					</div>
 				);
@@ -314,6 +339,7 @@ export function visibleRange(
 export function toCalendarEvents(
 	rows: { id: string; title: string; startAt: string; endAt: string | null }[],
 	timeZone: string,
+	hrefFor?: (id: string) => string,
 ): CalendarEvent[] {
 	return rows.map((row) => {
 		const start = zoned(new Date(row.startAt), timeZone);
@@ -323,6 +349,7 @@ export function toCalendarEvents(
 			date: start.date,
 			start: start.time,
 			end: row.endAt ? zoned(new Date(row.endAt), timeZone).time : start.time,
+			href: hrefFor?.(row.id),
 		};
 	});
 }

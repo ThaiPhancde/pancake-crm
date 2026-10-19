@@ -6,6 +6,7 @@ import { Button } from "@crm/ui/components/button";
 import { Icon } from "@crm/ui/components/icon";
 import Link from "next/link";
 import { Suspense } from "react";
+import { z } from "zod";
 import { PageShellLoading } from "@/components/page-shell";
 import { formatDate } from "@/components/pancake/format";
 import {
@@ -20,12 +21,15 @@ import {
 	MoreMenu,
 	QuickViewChip,
 	RangeChip,
-	SortButton,
 	StatsToggle,
 	ViewSwitch,
 } from "@/components/shop/filter-bar";
 import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
+import { ConvertLeadButton } from "@/components/shop/lists/convert-lead-button";
+import { DetailFields } from "@/components/shop/lists/detail-fields";
+import { loadSavedFilters } from "@/components/shop/lists/saved-filters-server";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
+import { OrderDetailSheet } from "@/components/shop/order-detail-sheet";
 import { ShopPage, ShopPageBody, ShopPageHeader } from "@/components/shop/page";
 import {
 	type SearchValues,
@@ -37,6 +41,8 @@ import { RecordQuickEdit } from "@/components/shop/record-quick-edit";
 import { CreateRecordButton } from "@/components/shop/record-sheet";
 import { initials } from "@/lib/initials";
 
+const LEAD_FIELDS = z.record(z.string(), z.coerce.string()).catch({});
+
 const TONE_BAR = new Map<string, string>([
 	["blue", "border-b-[#1677ff]"],
 	["orange", "border-b-[#fa8c16]"],
@@ -44,6 +50,29 @@ const TONE_BAR = new Map<string, string>([
 	["green", "border-b-[#22c55e]"],
 	["gray", "border-b-[#9ca3af]"],
 ]);
+
+type LeadDetail = {
+	id: string;
+	name: string;
+	phone: string | null;
+	email: string | null;
+	status: string;
+	source: string | null;
+	note: string;
+	assigneeId: string | null;
+	creatorName: string | null;
+	createdAt: string;
+	updatedAt: string;
+	converted: boolean;
+	canWrite: boolean;
+	fields: Record<string, string>;
+};
+
+function toLeadDetail(
+	row: Omit<LeadDetail, "fields"> & { fields: unknown },
+): LeadDetail {
+	return { ...row, fields: LEAD_FIELDS.parse(row.fields) };
+}
 
 type LeadList = {
 	total: number;
@@ -81,8 +110,9 @@ async function Leads({
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const pageNum = Math.max(1, Number(text(values, "page") || "1"));
 	const filter = shopFilters({ ...values, status: undefined }, ctx.shopId);
-	const sellersQuery = ctx.api.sellers.query({ shopId: ctx.shopId });
-	const leads: LeadList = await ctx.api.leads.query({
+	const page = `${ctx.base}/leads`;
+	const leadId = text(values, "leadId");
+	const recordInput = {
 		shopId: ctx.shopId,
 		q: text(values, "q"),
 		status: text(values, "status") || undefined,
@@ -92,10 +122,24 @@ async function Leads({
 		quick: text(values, "quick") || undefined,
 		from: filter.input.from,
 		to: filter.input.to,
+	};
+	const sellersQuery = ctx.api.sellers.query({ shopId: ctx.shopId });
+	const savedQuery = loadSavedFilters(ctx.shopId, "leads");
+	const detailQuery: Promise<LeadDetail | null> = leadId
+		? ctx.api.leadDetail
+				.query({ shopId: ctx.shopId, id: leadId })
+				.then(toLeadDetail)
+				.catch(() => null)
+		: Promise.resolve(null);
+	const leads: LeadList = await ctx.api.leads.query({
+		...recordInput,
 		page: pageNum,
 		pageSize: 25,
 	});
 	const sellers = await sellersQuery;
+	const saved = await savedQuery;
+	const detail = await detailQuery;
+	const leadHref = (id: string) => withParams(page, values, { leadId: id });
 	const staff = sellers.map((seller) => ({
 		value: seller.employeeId,
 		label: seller.name,
@@ -147,16 +191,29 @@ async function Leads({
 				<FilterBar
 					toolbar={
 						<>
-							<SortButton
-								fields={columns.map((c) => ({ value: c.key, label: c.label }))}
-							/>
 							<FilterButton
-								fields={collection.fields
-									.filter((f) => !f.hidden)
-									.map((f) => ({
-										value: f.key,
-										label: f.label,
-									}))}
+								saved={saved}
+								fields={[
+									{
+										param: "status",
+										label: "Trạng thái",
+										options: LEAD_STATUSES,
+									},
+									{
+										param: "assignee",
+										label: "Phân công",
+										options: [
+											{ value: "none", label: "Chưa được phân công" },
+											...staff,
+										],
+									},
+									{ param: "creator", label: "Người tạo", options: staff },
+									{
+										param: "source",
+										label: "Nguồn khách hàng",
+										options: SOURCE_OPTIONS,
+									},
+								]}
 							/>
 							<StatsToggle />
 							<ViewSwitch
@@ -173,7 +230,13 @@ async function Leads({
 									},
 								]}
 							/>
-							<MoreMenu />
+							<MoreMenu
+								exportRequest={{
+									kind: "leads",
+									shopId: ctx.shopId,
+									filters: recordInput,
+								}}
+							/>
 						</>
 					}
 				>
@@ -183,7 +246,7 @@ async function Leads({
 							{ value: "mine-new", label: "Tiềm năng mới của tôi" },
 							{ value: "mine-week", label: "Tiềm năng tuần này của tôi" },
 						]}
-						savedFilters="⚙ Bộ lọc đã lưu (0/10)"
+						saved={saved}
 					/>
 					<FilterChip
 						label="Phân công"
@@ -271,9 +334,13 @@ async function Leads({
 													key={lead.id}
 													className="rounded-lg border bg-card p-3 shadow-2xs"
 												>
-													<div className="font-semibold text-sm">
+													<Link
+														href={leadHref(lead.id)}
+														scroll={false}
+														className="font-semibold text-sm hover:text-primary"
+													>
 														{lead.name}
-													</div>
+													</Link>
 													<div className="mt-1 text-muted-foreground text-xs">
 														{lead.phone ?? lead.email ?? "Chưa có SĐT"}
 													</div>
@@ -319,9 +386,17 @@ async function Leads({
 					<>
 						<ListTable
 							columns={columns}
+							bulk={{
+								shopId: ctx.shopId,
+								entity: "lead",
+								statuses: LEAD_STATUSES,
+								staff,
+								canWrite: leads.canWrite,
+							}}
 							rows={leads.rows.map((lead) => {
 								return {
 									key: lead.id,
+									href: leadHref(lead.id),
 									cells: [
 										lead.name,
 										lead.phone ?? <Dash />,
@@ -362,12 +437,69 @@ async function Leads({
 							pageSize={25}
 							unit="tiềm năng"
 							pageHref={(next) =>
-								withParams(`${ctx.base}/leads`, values, { page: String(next) })
+								withParams(page, values, { page: String(next) })
 							}
 						/>
 					</>
 				)}
 			</ShopPageBody>
+			{detail ? (
+				<OrderDetailSheet
+					title={`Tiềm năng · ${detail.name}`}
+					closeHref={withParams(page, values, { leadId: "" })}
+				>
+					<DetailFields
+						items={[
+							{ label: "Tên", value: detail.name },
+							{ label: "Số điện thoại", value: detail.phone },
+							{ label: "Email", value: detail.email },
+							{
+								label: "Trạng thái",
+								value: (
+									<RecordQuickEdit
+										kind="lead"
+										field="status"
+										id={detail.id}
+										shopId={ctx.shopId}
+										value={detail.status}
+										options={LEAD_STATUSES}
+										disabled={!detail.canWrite}
+									/>
+								),
+							},
+							{
+								label: "Phân công",
+								value: (
+									<RecordQuickEdit
+										kind="lead"
+										field="assigneeId"
+										id={detail.id}
+										shopId={ctx.shopId}
+										value={detail.assigneeId}
+										options={staff}
+										disabled={!detail.canWrite}
+									/>
+								),
+							},
+							{ label: "Nguồn", value: detail.source },
+							{ label: "Người tạo", value: detail.creatorName },
+							{ label: "Ngày tạo", value: formatDate(detail.createdAt) },
+							{ label: "Cập nhật", value: formatDate(detail.updatedAt) },
+							{ label: "Ghi chú", value: detail.note || null },
+							...Object.entries(detail.fields).map(([label, value]) => ({
+								label,
+								value,
+							})),
+						]}
+					/>
+					<ConvertLeadButton
+						shopId={ctx.shopId}
+						id={detail.id}
+						converted={detail.converted}
+						canWrite={detail.canWrite}
+					/>
+				</OrderDetailSheet>
+			) : null}
 		</ShopPage>
 	);
 }

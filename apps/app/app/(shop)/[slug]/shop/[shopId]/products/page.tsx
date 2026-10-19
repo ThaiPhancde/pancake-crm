@@ -6,15 +6,10 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
 import { formatAmount } from "@/components/pancake/format";
-import { COLLECTIONS, PRODUCT_TYPES } from "@/components/shop/collections";
-import {
-	FilterBar,
-	FilterButton,
-	FilterChip,
-	MoreMenu,
-	SearchBox,
-} from "@/components/shop/filter-bar";
+import { COLLECTIONS } from "@/components/shop/collections";
+import { FilterBar, MoreMenu, SearchBox } from "@/components/shop/filter-bar";
 import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
+import { LIST_CONFIG } from "@/components/shop/lists/config";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { ShopPage, ShopPageBody, ShopPageHeader } from "@/components/shop/page";
 import {
@@ -75,6 +70,7 @@ async function Products({
 						</Button>
 						<CreateRecordButton
 							collection="product"
+							disabledReason={LIST_CONFIG.oneWayReason}
 							menu={[
 								{ label: "Nhập từ Excel" },
 								{ label: "Đồng bộ từ Pancake POS" },
@@ -88,23 +84,17 @@ async function Products({
 					toolbar={
 						<>
 							<SearchBox placeholder="Tên sản phẩm, SKU" className="w-56" />
-							<FilterButton
-								fields={collection.fields.map((f) => ({
-									value: f.key,
-									label: f.label,
-								}))}
+							<MoreMenu
+								exportRequest={{
+									kind: "products",
+									shopId: ctx.shopId,
+									filters: filter.input,
+								}}
 							/>
-							<MoreMenu />
 						</>
 					}
 				>
-					<FilterChip
-						label="Loại hình"
-						param="type"
-						multiple
-						options={PRODUCT_TYPES}
-					/>
-					<FilterChip label="Danh mục" param="category" multiple options={[]} />
+					{null}
 				</FilterBar>
 				<ListTable
 					columns={columns}

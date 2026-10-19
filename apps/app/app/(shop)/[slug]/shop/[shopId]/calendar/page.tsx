@@ -21,11 +21,15 @@ import {
 	FilterButton,
 	FilterChip,
 	MoreMenu,
+	QuickViewChip,
 	RangeChip,
 	ViewSwitch,
 } from "@/components/shop/filter-bar";
 import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
+import { DetailFields } from "@/components/shop/lists/detail-fields";
+import { loadSavedFilters } from "@/components/shop/lists/saved-filters-server";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
+import { OrderDetailSheet } from "@/components/shop/order-detail-sheet";
 import { ShopPage, ShopPageBody, ShopPageHeader } from "@/components/shop/page";
 import {
 	type SearchValues,
@@ -68,15 +72,19 @@ async function Appointments({
 		view === "calendar"
 			? visibleRange(date, mode, timeZone)
 			: shopFilters({ ...values, status: undefined }, ctx.shopId).input;
-	const [sellers, appointments, customers] = await Promise.all([
+	const appointmentId = text(values, "appointmentId");
+	const recordInput = {
+		shopId: ctx.shopId,
+		q: text(values, "q"),
+		status: text(values, "status") || undefined,
+		assigneeId: text(values, "assignee") || undefined,
+		from: bounds.from,
+		to: bounds.to,
+	};
+	const [sellers, appointments, customers, saved] = await Promise.all([
 		ctx.api.sellers.query({ shopId: ctx.shopId }),
 		ctx.api.appointments.query({
-			shopId: ctx.shopId,
-			q: text(values, "q"),
-			status: text(values, "status") || undefined,
-			assigneeId: text(values, "assignee") || undefined,
-			from: bounds.from,
-			to: bounds.to,
+			...recordInput,
 			page: view === "calendar" ? 1 : pageNum,
 			pageSize: view === "calendar" ? PANCAKE.maxListSize : 25,
 		}),
@@ -84,7 +92,17 @@ async function Appointments({
 			shopId: ctx.shopId,
 			pageSize: PANCAKE.maxListSize,
 		}),
+		loadSavedFilters(ctx.shopId, "appointments"),
 	]);
+	const selected = appointmentId
+		? (appointments.rows.find((row) => row.id === appointmentId) ??
+			(
+				await ctx.api.appointments.query({
+					shopId: ctx.shopId,
+					pageSize: PANCAKE.maxListSize,
+				})
+			).rows.find((row) => row.id === appointmentId))
+		: undefined;
 	const staff = sellers.map((seller) => ({
 		value: seller.employeeId,
 		label: seller.name,
@@ -97,6 +115,8 @@ async function Appointments({
 	}));
 	const collection = COLLECTIONS.appointment;
 	const page = `${ctx.base}/calendar`;
+	const appointmentHref = (id: string) =>
+		withParams(page, values, { appointmentId: id });
 	const columns = collection.fields
 		.filter((field) => field.list)
 		.map((field) => ({ key: field.key, label: field.label }));
@@ -134,18 +154,38 @@ async function Appointments({
 									},
 								]}
 							/>
-							{view === "table" ? (
-								<FilterButton
-									fields={collection.fields.map((f) => ({
-										value: f.key,
-										label: f.label,
-									}))}
-								/>
-							) : null}
-							<MoreMenu />
+							<FilterButton
+								saved={saved}
+								fields={[
+									{
+										param: "status",
+										label: "Trạng thái",
+										options: APPOINTMENT_STATUSES,
+									},
+									{
+										param: "assignee",
+										label: "Phân công",
+										options: [
+											{ value: "none", label: "Chưa được phân công" },
+											...staff,
+										],
+									},
+								]}
+							/>
+							<MoreMenu
+								exportRequest={{
+									kind: "appointments",
+									shopId: ctx.shopId,
+									filters: recordInput,
+								}}
+							/>
 						</>
 					}
 				>
+					<QuickViewChip
+						options={[{ value: "all", label: "Tất cả lịch hẹn" }]}
+						saved={saved}
+					/>
 					<FilterChip
 						label="Phân công"
 						param="assignee"
@@ -185,14 +225,26 @@ async function Appointments({
 						date={date}
 						mode={mode}
 						today={today}
-						events={toCalendarEvents(appointments.rows, timeZone)}
+						events={toCalendarEvents(
+							appointments.rows,
+							timeZone,
+							appointmentHref,
+						)}
 					/>
 				) : (
 					<>
 						<ListTable
 							columns={columns}
+							bulk={{
+								shopId: ctx.shopId,
+								entity: "appointment",
+								statuses: APPOINTMENT_STATUSES,
+								staff,
+								canWrite: appointments.canWrite,
+							}}
 							rows={appointments.rows.map((item) => ({
 								key: item.id,
+								href: appointmentHref(item.id),
 								cells: [
 									item.title,
 									item.contactName ?? <Dash />,
@@ -234,6 +286,55 @@ async function Appointments({
 					</>
 				)}
 			</ShopPageBody>
+			{selected ? (
+				<OrderDetailSheet
+					title={`Lịch hẹn · ${selected.title}`}
+					closeHref={withParams(page, values, { appointmentId: "" })}
+				>
+					<DetailFields
+						items={[
+							{ label: "Tiêu đề", value: selected.title },
+							{ label: "Liên hệ", value: selected.contactName },
+							{ label: "Số điện thoại", value: selected.phone },
+							{ label: "Bắt đầu", value: formatDate(selected.startAt) },
+							{
+								label: "Kết thúc",
+								value: selected.endAt ? formatDate(selected.endAt) : null,
+							},
+							{
+								label: "Trạng thái",
+								value: (
+									<RecordQuickEdit
+										kind="appointment"
+										field="status"
+										id={selected.id}
+										shopId={ctx.shopId}
+										value={selected.status}
+										options={APPOINTMENT_STATUSES}
+										disabled={!appointments.canWrite}
+									/>
+								),
+							},
+							{
+								label: "Phân công",
+								value: (
+									<RecordQuickEdit
+										kind="appointment"
+										field="assigneeId"
+										id={selected.id}
+										shopId={ctx.shopId}
+										value={selected.assigneeId}
+										options={staff}
+										disabled={!appointments.canWrite}
+									/>
+								),
+							},
+							{ label: "Kênh", value: selected.source },
+							{ label: "Ghi chú", value: selected.note || null },
+						]}
+					/>
+				</OrderDetailSheet>
+			) : null}
 		</ShopPage>
 	);
 }

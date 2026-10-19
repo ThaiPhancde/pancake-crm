@@ -9,7 +9,10 @@ import { COLLECTIONS, type CollectionKey } from "@/components/shop/collections";
 import { EmptyBox } from "@/components/shop/empty-state";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { type SearchValues, text, withParams } from "@/components/shop/params";
+import { UNSUPPORTED } from "@/components/shop/settings/config";
+import { Unsupported } from "@/components/shop/settings/unsupported";
 import { SettingsFrame, SettingsTabs } from "@/components/shop/settings-frame";
+import { getServerTrpcClient } from "@/lib/trpc/server";
 
 const TABS = [
 	{ value: "modules", label: "Thiết lập module" },
@@ -23,7 +26,12 @@ type Module = {
 	icon: string;
 	description: string;
 	toggle?: boolean;
-	options: { title: string; description: string; toggle?: boolean }[];
+	options: {
+		title: string;
+		description: string;
+		toggle?: boolean;
+		linked?: boolean;
+	}[];
 };
 
 const MODULES: Module[] = [
@@ -89,6 +97,7 @@ const MODULES: Module[] = [
 				title: "Gộp theo số điện thoại",
 				description: "Bỏ mã quốc gia khi so khớp khách giữa các đơn",
 				toggle: true,
+				linked: true,
 			},
 		],
 	},
@@ -154,6 +163,9 @@ async function Tools({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
+	const settings = await getServerTrpcClient().pancakeSettings.get.query({
+		shopId: ctx.shopId,
+	});
 	const tab = TABS.some((item) => item.value === text(values, "tab"))
 		? text(values, "tab")
 		: "modules";
@@ -211,7 +223,21 @@ async function Tools({
 											</p>
 										</div>
 										{option.toggle ? (
-											<Switch defaultChecked />
+											<Unsupported
+												reason={
+													option.linked
+														? UNSUPPORTED.generalSettings
+														: UNSUPPORTED.modules
+												}
+											>
+												<Switch
+													checked={
+														option.linked ? settings.mergeOrdersByPhone : false
+													}
+													disabled
+													aria-label={option.title}
+												/>
+											</Unsupported>
 										) : (
 											<Button
 												asChild
@@ -241,7 +267,9 @@ async function Tools({
 								</p>
 							</div>
 						</div>
-						<Switch />
+						<Unsupported reason={UNSUPPORTED.modules}>
+							<Switch checked={false} disabled aria-label="Công ty" />
+						</Unsupported>
 					</section>
 				</div>
 			) : (
@@ -254,7 +282,7 @@ async function Tools({
 									? "Chưa có mẫu email"
 									: "Chưa có webhook hoặc API key"
 						}
-						description="Tính năng này sẽ nối backend ở đợt sau."
+						description={UNSUPPORTED.feature}
 					/>
 				</div>
 			)}

@@ -26,14 +26,21 @@ import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
 import { googleConnectionStatusOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
-import { listInput, customerDetailInput, roleInput, approveEmployeeInput, recordListInput, createLeadInput, createAppointmentInput, createTicketInput, createNoteInput, updateLeadInput, updateAppointmentInput, updateTicketInput, reportInput } from "@crm/pancake/contracts";
+import { notificationListInput, notificationShopInput, markReadInput, markAllReadInput, automationListInput, createAutomationInput, updateAutomationInput, toggleAutomationInput, automationRefInput } from "@crm/pancake/notifications";
+import { updateSettingsInput, copySettingsInput, revenueTargetsInput, setRevenueTargetInput, updatePreferenceInput, savedFilterListInput, createSavedFilterInput, savedFilterRefInput, setDefaultSavedFilterInput } from "@crm/pancake/settings";
+import { branchInput, updateBranchInput, branchRefInput, branchMembersInput, profileInput, updateProfileInput, profileRefInput, assignProfileInput, historyListInput, historyExportInput } from "@crm/pancake/admin";
+import { listInput, customerDetailInput, businessReportInput, roleInput, approveEmployeeInput, recordListInput, createLeadInput, createAppointmentInput, createTicketInput, createNoteInput, updateLeadInput, updateAppointmentInput, updateTicketInput, reportInput, recordRefInput, bulkUpdateInput } from "@crm/pancake/contracts";
 import { taskListInput, createTaskInput, updateTaskInput } from "@crm/pancake/tasks";
+import { searchInput } from "@crm/pancake/insights";
+import { exportInput } from "@crm/pancake/exports";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput } from "../settings/settings.contracts";
 import { slackStatusOutput, slackMatchesOutput, slackChannelsInput, slackChannelsOutput, slackJoinChannelInput, slackJoinChannelOutput, slackRefreshPeopleOutput, slackCreateChannelInput, slackCreateChannelOutput, slackDisconnectOutput } from "../slack/slack.contracts";
 import { ssoSignInOptionsOutput, ssoSettingsOutput, ssoProviderListInput, ssoProviderListOutput, registerSsoProviderInput, ssoProviderOutput, deleteSsoProviderInput, deleteSsoProviderOutput } from "../sso/sso.contracts";
 import { trackingSettingsOutput, trackingFlagInput, cookieLifetimeInput, addDomainInput, trackedDomainOutput, removeDomainInput, rotateSiteIdOutput, verifyInput, verifyOutput, sourcesOutput, companyActivityInput, websiteActivityOutput, contactActivityInput } from "../tracking/tracking.contracts";
 import { workspaceOutput, memberListInput, memberListOutput, updateWorkspaceInput, setMemberRoleInput, workspaceMemberOutput } from "../workspace/workspace.contracts";
+import type { PancakeInboxRouter } from "../pancake/pancake-inbox.router";
+import type { PancakeSettingsRouter } from "../pancake/pancake-settings.router";
 import type { PancakeRouter } from "../pancake/pancake.router";
 import type { UsersRouter } from "../users/users.router";
 
@@ -579,6 +586,106 @@ const appRouter = t.router({
       .output(microsoftConnectionStatusOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
+  pancakeInbox: t.router({
+    notifications: publicProcedure
+      .input(notificationListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeInboxRouter["notifications"]>>),
+    counts: publicProcedure
+      .input(notificationShopInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeInboxRouter["counts"]>>),
+    markRead: publicProcedure
+      .input(markReadInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeInboxRouter["markRead"]>>),
+    markAllRead: publicProcedure
+      .input(markAllReadInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeInboxRouter["markAllRead"]>>),
+    automations: publicProcedure
+      .input(automationListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeInboxRouter["automations"]>>),
+    createAutomation: publicProcedure
+      .input(createAutomationInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeInboxRouter["createAutomation"]>>),
+    updateAutomation: publicProcedure
+      .input(updateAutomationInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeInboxRouter["updateAutomation"]>>),
+    toggleAutomation: publicProcedure
+      .input(toggleAutomationInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeInboxRouter["toggleAutomation"]>>),
+    archiveAutomation: publicProcedure
+      .input(automationRefInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeInboxRouter["archiveAutomation"]>>)
+    }),
+  pancakeSettings: t.router({
+    get: publicProcedure
+      .input(z.object({ shopId: z.string().min(1) }))
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["get"]>>),
+    update: publicProcedure
+      .input(updateSettingsInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["update"]>>),
+    copyFrom: publicProcedure
+      .input(copySettingsInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["copyFrom"]>>),
+    revenueTargets: publicProcedure
+      .input(revenueTargetsInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["revenueTargets"]>>),
+    setRevenueTarget: publicProcedure
+      .input(setRevenueTargetInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["setRevenueTarget"]>>),
+    preferences: publicProcedure
+      .input(z.object({ shopId: z.string().min(1) }))
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["preferences"]>>),
+    updatePreferences: publicProcedure
+      .input(updatePreferenceInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["updatePreferences"]>>),
+    savedFilters: publicProcedure
+      .input(savedFilterListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["savedFilters"]>>),
+    createSavedFilter: publicProcedure
+      .input(createSavedFilterInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["createSavedFilter"]>>),
+    deleteSavedFilter: publicProcedure
+      .input(savedFilterRefInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["deleteSavedFilter"]>>),
+    setDefaultSavedFilter: publicProcedure
+      .input(setDefaultSavedFilterInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["setDefaultSavedFilter"]>>),
+    branches: publicProcedure
+      .input(z.object({ shopId: z.string().min(1) }))
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["branches"]>>),
+    createBranch: publicProcedure
+      .input(branchInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["createBranch"]>>),
+    updateBranch: publicProcedure
+      .input(updateBranchInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["updateBranch"]>>),
+    archiveBranch: publicProcedure
+      .input(branchRefInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["archiveBranch"]>>),
+    setBranchMembers: publicProcedure
+      .input(branchMembersInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["setBranchMembers"]>>),
+    profiles: publicProcedure
+      .input(z.object({ shopId: z.string().min(1) }))
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["profiles"]>>),
+    createProfile: publicProcedure
+      .input(profileInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["createProfile"]>>),
+    updateProfile: publicProcedure
+      .input(updateProfileInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["updateProfile"]>>),
+    deleteProfile: publicProcedure
+      .input(profileRefInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["deleteProfile"]>>),
+    assignProfile: publicProcedure
+      .input(assignProfileInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["assignProfile"]>>),
+    history: publicProcedure
+      .input(historyListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["history"]>>),
+    exportHistory: publicProcedure
+      .input(historyExportInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["exportHistory"]>>)
+    }),
   pancake: t.router({
     overview: publicProcedure
       .input(listInput)
@@ -611,7 +718,7 @@ const appRouter = t.router({
       .input(listInput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["products"]>>),
     report: publicProcedure
-      .input(listInput)
+      .input(businessReportInput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["report"]>>),
     detail: publicProcedure
       .input(z.object({ shopId: z.string().min(1) }).extend({ orderId: z.string().min(1) }))
@@ -681,7 +788,28 @@ const appRouter = t.router({
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["ticketReport"]>>),
     leadReport: publicProcedure
       .input(reportInput)
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["leadReport"]>>)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["leadReport"]>>),
+    leadDetail: publicProcedure
+      .input(recordRefInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["leadDetail"]>>),
+    convertLead: publicProcedure
+      .input(recordRefInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["convertLead"]>>),
+    bulkUpdate: publicProcedure
+      .input(bulkUpdateInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["bulkUpdate"]>>),
+    search: publicProcedure
+      .input(searchInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["search"]>>),
+    exportCsv: publicProcedure
+      .input(exportInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["exportCsv"]>>),
+    customerReport: publicProcedure
+      .input(reportInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["customerReport"]>>),
+    taskReport: publicProcedure
+      .input(reportInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["taskReport"]>>)
     }),
   savedViews: t.router({
     list: publicProcedure

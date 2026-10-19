@@ -13,6 +13,8 @@ import {
 	ReportEmpty,
 	ReportPage,
 } from "@/components/shop/report";
+import { REPORTS } from "@/components/shop/reports/config";
+import { ShopTrendChart } from "@/components/shop/shop-trend-chart";
 
 export default function TasksReportPage(props: {
 	params: Promise<ShopRoute>;
@@ -34,43 +36,52 @@ async function Tasks({
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const filter = shopFilters(values, ctx.shopId, "week");
-	const [all, done] = await Promise.all([
-		ctx.api.tasks.query({ ...filter.input, taskView: "all", pageSize: 25 }),
-		ctx.api.tasks.query({ ...filter.input, taskView: "done", pageSize: 1 }),
+	const [all, summary] = await Promise.all([
+		ctx.api.tasks.query({ ...filter.input, taskView: "all" }),
+		ctx.api.taskReport.query({
+			shopId: ctx.shopId,
+			from: filter.input.from,
+			to: filter.input.to,
+		}),
 	]);
-	const onTime = all.total ? Math.round((100 * done.total) / all.total) : 0;
+	const doneRate = summary.created
+		? Math.round((REPORTS.percentScale * summary.done) / summary.created)
+		: 0;
+	const hasTrend = summary.days.some(
+		(day) => day.created || day.done || day.overdue,
+	);
 
 	return (
 		<ReportPage title="Báo cáo nhiệm vụ" timeZone={filter.timeZone}>
 			<ReportCard title="Tổng quan">
 				<MetricRow
 					metrics={[
-						{ label: "Tổng số nhiệm vụ", value: all.total },
-						{ label: "Nhiệm vụ hoàn thành", value: done.total },
-						{ label: "Nhiệm vụ quá hạn", value: all.overdue },
-						{ label: "Tỷ lệ hoàn thành đúng hạn", value: `${onTime}%` },
+						{ label: "Nhiệm vụ tạo mới", value: summary.created },
+						{ label: "Nhiệm vụ hoàn thành", value: summary.done },
+						{ label: "Nhiệm vụ quá hạn", value: summary.overdue },
+						{ label: "Tỷ lệ hoàn thành", value: `${doneRate}%` },
 					]}
 				/>
 			</ReportCard>
 			<ReportCard
 				title="Xu hướng nhiệm vụ theo thời gian"
-				description="Hover để xem chi tiết"
+				description="Di chuột lên biểu đồ để xem chi tiết"
 			>
-				<ReportEmpty label="Chưa có chuỗi nhiệm vụ theo ngày." />
-				<div className="flex justify-center gap-4 text-muted-foreground text-xs">
-					<span>● Quá hạn</span>
-					<span className="text-success">● Hoàn thành</span>
-					<span className="text-primary">● Tạo mới</span>
-				</div>
+				{hasTrend ? (
+					<ShopTrendChart
+						height={REPORTS.trendHeight}
+						data={summary.days}
+						xKey="date"
+						config={{
+							overdue: { label: "Quá hạn", color: "var(--chart-2)" },
+							done: { label: "Hoàn thành", color: "var(--chart-3)" },
+							created: { label: "Tạo mới", color: "var(--chart-1)" },
+						}}
+					/>
+				) : (
+					<ReportEmpty label="Không có nhiệm vụ trong khoảng thời gian này." />
+				)}
 			</ReportCard>
-			<div className="grid gap-3 lg:grid-cols-2">
-				<ReportCard title="Danh mục">
-					<ReportEmpty />
-				</ReportCard>
-				<ReportCard title="Mức độ ưu tiên">
-					<ReportEmpty />
-				</ReportCard>
-			</div>
 			<ReportCard title="Danh sách nhiệm vụ">
 				<ListTable
 					selectable={false}

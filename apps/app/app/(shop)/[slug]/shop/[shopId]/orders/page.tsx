@@ -1,3 +1,4 @@
+import { PANCAKE } from "@crm/pancake/config";
 import { Alert, AlertDescription, AlertTitle } from "@crm/ui/components/alert";
 import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
@@ -14,16 +15,20 @@ import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
 import { formatAmount, formatDate } from "@/components/pancake/format";
 import { TaskCreate } from "@/components/pancake/task-actions";
-import { COLLECTIONS, SOURCE_OPTIONS } from "@/components/shop/collections";
+import { COLLECTIONS } from "@/components/shop/collections";
 import {
 	FilterBar,
 	FilterButton,
 	FilterChip,
 	MoreMenu,
+	QuickViewChip,
 	RangeChip,
 	SearchBox,
+	SortButton,
 } from "@/components/shop/filter-bar";
 import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
+import { LIST_CONFIG } from "@/components/shop/lists/config";
+import { loadSavedFilters } from "@/components/shop/lists/saved-filters-server";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { OrderDetailSheet } from "@/components/shop/order-detail-sheet";
 import {
@@ -60,7 +65,7 @@ async function Orders({
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const filter = shopFilters(values, ctx.shopId);
 	const page = `${ctx.base}/orders`;
-	const [purchases, orders, sellers, detail] = await Promise.all([
+	const [purchases, orders, sellers, detail, saved] = await Promise.all([
 		filter.customerId
 			? ctx.api.purchases.query({
 					shopId: ctx.shopId,
@@ -77,6 +82,7 @@ async function Orders({
 					.query({ shopId: ctx.shopId, orderId: filter.orderId })
 					.catch(() => null)
 			: Promise.resolve(null),
+		loadSavedFilters(ctx.shopId, "orders"),
 	]);
 	const assignees = detail?.canCreateTask
 		? await ctx.api.taskAssignees.query({
@@ -109,6 +115,7 @@ async function Orders({
 						<CreateRecordButton
 							collection="order"
 							users={staff}
+							disabledReason={LIST_CONFIG.oneWayReason}
 							menu={[
 								{ label: "Nhập từ Excel" },
 								{ label: "Đồng bộ từ Pancake POS" },
@@ -137,16 +144,48 @@ async function Orders({
 								placeholder="Mã đơn, tên khách, điện thoại, vận đơn"
 								className="w-64"
 							/>
-							<FilterButton
-								fields={collection.fields.map((f) => ({
-									value: f.key,
-									label: f.label,
-								}))}
+							<SortButton
+								options={[
+									{ value: "newest", label: "Mới nhất" },
+									{ value: "updated", label: "Cập nhật gần nhất" },
+									{ value: "oldest", label: "Cũ nhất" },
+								]}
 							/>
-							<MoreMenu />
+							<FilterButton
+								saved={saved}
+								fields={[
+									{
+										param: "status",
+										label: "Trạng thái",
+										options: ORDER_STATUS_OPTIONS,
+									},
+									{
+										param: "sellerId",
+										label: "Phân công",
+										options: [
+											{
+												value: PANCAKE.unassignedValue,
+												label: "Chưa phân công",
+											},
+											...staff,
+										],
+									},
+								]}
+							/>
+							<MoreMenu
+								exportRequest={{
+									kind: "orders",
+									shopId: ctx.shopId,
+									filters: filter.input,
+								}}
+							/>
 						</>
 					}
 				>
+					<QuickViewChip
+						options={[{ value: "all", label: "Tất cả đơn hàng" }]}
+						saved={saved}
+					/>
 					<FilterChip
 						label="Phân công"
 						param="sellerId"
@@ -159,19 +198,6 @@ async function Orders({
 						options={ORDER_STATUS_OPTIONS}
 					/>
 					<RangeChip />
-					<FilterChip
-						label="Người tạo"
-						param="creator"
-						multiple
-						searchable
-						options={staff}
-					/>
-					<FilterChip
-						label="Nguồn"
-						param="source"
-						multiple
-						options={SOURCE_OPTIONS}
-					/>
 				</FilterBar>
 				<ListTable
 					columns={columns}

@@ -4,11 +4,6 @@ import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
 import { DonutStat } from "@crm/ui/components/dashboard-chart";
 import { Icon } from "@crm/ui/components/icon";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@crm/ui/components/tooltip";
 import Link from "next/link";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
@@ -34,8 +29,10 @@ import {
 } from "@/components/shop/range";
 import { RangeToggle, RefreshButton } from "@/components/shop/range-picker";
 import { HorizontalBars, ReportCard } from "@/components/shop/report";
+import { RevenueTarget } from "@/components/shop/reports/revenue-target";
 import { shopProfile } from "@/components/shop/shop-profile";
 import { ShopTrendChart } from "@/components/shop/shop-trend-chart";
+import { getServerTrpcClient } from "@/lib/trpc/server";
 
 export default function HomePage(props: {
 	params: Promise<ShopRoute>;
@@ -97,6 +94,41 @@ function Greeting({
 	);
 }
 
+async function monthGoal(
+	shopId: string,
+	timeZone: string,
+	fallbackCurrency: string,
+) {
+	const month = zonedDateTime(new Date(), timeZone).date.slice(0, 7);
+	const settings = getServerTrpcClient().pancakeSettings;
+	const [targets, shopSettings, monthReport] = await Promise.all([
+		settings.revenueTargets.query({
+			shopId,
+			year: Number(month.slice(0, 4)),
+		}),
+		settings.get.query({ shopId }),
+		getServerTrpcClient().pancake.report.query(
+			shopFilters({ range: "month" }, shopId).input,
+		),
+	]);
+	const monthTargets = targets.filter((row) => row.month === month);
+	const target =
+		monthTargets.find((row) => row.currency === shopSettings.currency) ??
+		monthTargets[0];
+	const currency =
+		target?.currency ?? shopSettings.currency ?? fallbackCurrency;
+	return {
+		month,
+		monthLabel: `tháng ${month.slice(5)}/${month.slice(0, 4)}`,
+		currency,
+		target: target?.amount ?? null,
+		booked:
+			monthReport.revenue.find((row) => row.currency === currency)?.amount ??
+			"0",
+		canManage: shopSettings.canManage,
+	};
+}
+
 async function Home({
 	params,
 	searchParams,
@@ -130,6 +162,14 @@ async function Home({
 			? (personalEmployee?.employeeId ?? "__personal_none__")
 			: undefined;
 	const week = shopFilters({ range: "week" }, ctx.shopId).input;
+	const goalRequest =
+		view === "manager"
+			? monthGoal(
+					ctx.shopId,
+					filter.timeZone,
+					shopProfile(ctx.shopId).currency,
+				).catch(() => null)
+			: null;
 	const [overview, report, customers, tasks, leads, tickets, appointments] =
 		await Promise.all([
 			ctx.api.overview.query(scopedInput),
@@ -160,6 +200,7 @@ async function Home({
 					})
 				: null,
 		]);
+	const goal = await goalRequest;
 	const today = rangeBounds("today", new Date(), filter.timeZone).from;
 	const events = (appointments?.rows ?? []).map((item) => {
 		const start = zonedDateTime(new Date(item.startAt), filter.timeZone);
@@ -235,7 +276,7 @@ async function Home({
 										emoji="👥"
 									/>
 									<Tile
-										label="Tỷ lệ chuyển đổi"
+										label="Tỷ lệ đơn thành công"
 										value={`${rate}%`}
 										emoji="📣"
 									/>
@@ -283,24 +324,13 @@ async function Home({
 							) : null}
 						</ReportCard>
 						<ReportCard title="Mục tiêu doanh thu">
-							<div className="rounded-md border-primary border-l-2 bg-muted px-4 py-6 text-muted-foreground text-xs">
-								Chưa đặt mục tiêu cho shop này.
-								<Tooltip>
-									<TooltipTrigger asChild>
-										<span className="ml-1 inline-flex">
-											<Button
-												variant="link"
-												size="sm"
-												className="px-0"
-												disabled
-											>
-												Thiết lập mục tiêu
-											</Button>
-										</span>
-									</TooltipTrigger>
-									<TooltipContent>Sắp ra mắt</TooltipContent>
-								</Tooltip>
-							</div>
+							{goal ? (
+								<RevenueTarget shopId={ctx.shopId} {...goal} />
+							) : (
+								<p className="text-muted-foreground text-xs">
+									Không tải được mục tiêu doanh thu.
+								</p>
+							)}
 						</ReportCard>
 					</div>
 					<div className="flex flex-col gap-3">
@@ -390,7 +420,7 @@ async function Home({
 										value: revenueText,
 										sub: receivedText,
 									},
-									{ label: "Tỷ lệ chuyển đổi", value: `${rate}%` },
+									{ label: "Tỷ lệ đơn thành công", value: `${rate}%` },
 								].map((item) => (
 									<div
 										key={item.label}

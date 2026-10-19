@@ -52,6 +52,12 @@ model User {
   pancakeMemberships PancakeShopMember[]
   assignedPancakeTasks PancakeTask[] @relation("PancakeTaskAssignee")
   createdPancakeTasks PancakeTask[] @relation("PancakeTaskCreator")
+  pancakePreferences   PancakeUserPreference[]
+  pancakeNotifications PancakeNotification[]
+  pancakeAutomations   PancakeAutomation[]
+  pancakeSavedFilters  PancakeSavedFilter[]
+  pancakeBranches      PancakeBranchMember[]
+  pancakeAuditLogs     PancakeAuditLog[]
 
   @@unique([email])
   @@map("user")
@@ -88,6 +94,16 @@ model PancakeShop {
   appointments      PancakeAppointment[]
   tickets           PancakeTicket[]
   notes             PancakeNote[]
+  settings          PancakeShopSettings?
+  revenueTargets    PancakeRevenueTarget[]
+  preferences       PancakeUserPreference[]
+  notifications     PancakeNotification[]
+  automations       PancakeAutomation[]
+  savedFilters      PancakeSavedFilter[]
+  branches          PancakeBranch[]
+  branchMembers     PancakeBranchMember[]
+  profiles          PancakePermissionProfile[]
+  auditLogs         PancakeAuditLog[]
 
   @@map("pancakeShop")
 }
@@ -97,8 +113,10 @@ model PancakeShopMember {
   userId     String
   role       PancakeRole
   employeeId String?
-  shop       PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profileId  String?
+  shop       PancakeShop               @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  user       User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile    PancakePermissionProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
 
   @@id([shopId, userId])
   @@index([userId])
@@ -389,6 +407,187 @@ model PancakeNote {
 
   @@index([shopId, customerId, createdAt])
   @@map("pancakeNote")
+}
+
+model PancakeShopSettings {
+  id                          String      @id @default(cuid())
+  shopId                      String      @unique
+  displayName                 String?
+  currency                    String?
+  timezone                    String?
+  countries                   String[]    @default([])
+  dialCode                    String?
+  showSamePhoneOnConversation Boolean     @default(false)
+  mergeOrdersByPhone          Boolean     @default(false)
+  customerSources             String[]    @default([])
+  createdAt                   DateTime    @default(now())
+  updatedAt                   DateTime    @updatedAt
+  shop                        PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@map("pancakeShopSettings")
+}
+
+model PancakeRevenueTarget {
+  id        String      @id @default(cuid())
+  shopId    String
+  month     String
+  currency  String
+  amount    Decimal     @db.Decimal(24, 4)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  shop      PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@unique([shopId, month, currency])
+  @@map("pancakeRevenueTarget")
+}
+
+model PancakeUserPreference {
+  id                      String      @id @default(cuid())
+  userId                  String
+  shopId                  String
+  disableAppNotifications Boolean     @default(false)
+  browserNotifications    Boolean     @default(false)
+  sound                   String      @default("silent")
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+  user                    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop                    PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, shopId])
+  @@index([shopId])
+  @@map("pancakeUserPreference")
+}
+
+model PancakeNotification {
+  id        String      @id @default(cuid())
+  userId    String
+  shopId    String
+  kind      String
+  title     String
+  body      String      @default("")
+  link      String?
+  dedupeKey String?
+  readAt    DateTime?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop      PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, shopId, createdAt])
+  @@index([userId, shopId, readAt])
+  @@index([shopId])
+  @@map("pancakeNotification")
+}
+
+model PancakeAutomation {
+  id          String      @id @default(cuid())
+  shopId      String
+  name        String
+  description String      @default("")
+  trigger     String
+  entity      String
+  action      String
+  config      Json        @default("{}")
+  enabled     Boolean     @default(true)
+  lastRunAt   DateTime?
+  lastStatus  String?
+  archivedAt  DateTime?
+  createdById String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  shop        PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  createdBy   User        @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([shopId, trigger, entity, enabled])
+  @@index([createdById])
+  @@map("pancakeAutomation")
+}
+
+model PancakeSavedFilter {
+  id        String      @id @default(cuid())
+  userId    String
+  shopId    String
+  page      String
+  name      String
+  params    Json        @default("{}")
+  isDefault Boolean     @default(false)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop      PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@index([userId, shopId, page])
+  @@index([shopId])
+  @@map("pancakeSavedFilter")
+}
+
+model PancakeBranch {
+  id         String                @id @default(cuid())
+  shopId     String
+  name       String
+  phone      String?
+  email      String?
+  address    String?
+  isDefault  Boolean               @default(false)
+  archivedAt DateTime?
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  shop       PancakeShop           @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  members    PancakeBranchMember[]
+
+  @@index([shopId, archivedAt])
+  @@map("pancakeBranch")
+}
+
+model PancakeBranchMember {
+  id         String        @id @default(cuid())
+  shopId     String
+  branchId   String
+  userId     String?
+  employeeId String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  shop       PancakeShop   @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  branch     PancakeBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  user       User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([branchId, userId])
+  @@unique([branchId, employeeId])
+  @@index([shopId])
+  @@index([userId])
+  @@map("pancakeBranchMember")
+}
+
+model PancakePermissionProfile {
+  id        String              @id @default(cuid())
+  shopId    String
+  name      String
+  matrix    Json                @default("{}")
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  shop      PancakeShop         @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  members   PancakeShopMember[]
+
+  @@unique([shopId, name])
+  @@map("pancakePermissionProfile")
+}
+
+model PancakeAuditLog {
+  id      String      @id @default(cuid())
+  shopId  String
+  userId  String?
+  area    String
+  action  String
+  summary String
+  at      DateTime    @default(now())
+  shop    PancakeShop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  user    User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, area, at])
+  @@index([shopId, at])
+  @@index([userId])
+  @@map("pancakeAuditLog")
 }
 
 model SlackMemberMatch {

@@ -8,6 +8,8 @@ import { formatDate } from "@/components/pancake/format";
 import { EmptyBox } from "@/components/shop/empty-state";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { type SearchValues, text, withParams } from "@/components/shop/params";
+import { UNSUPPORTED } from "@/components/shop/settings/config";
+import { Unsupported } from "@/components/shop/settings/unsupported";
 import { SettingsFrame, SettingsTabs } from "@/components/shop/settings-frame";
 import { SyncToggle } from "@/components/shop/sync-toggle";
 
@@ -62,12 +64,14 @@ async function Connections({
 						</div>
 						<EmptyBox
 							title="Chưa có page nào được kết nối!"
-							description='Bấm "Thêm trang" để kết nối Page.'
+							description={UNSUPPORTED.external}
 							action={
-								<Button disabled>
-									<Icon icon={Add} data-icon="inline-start" />
-									Thêm trang
-								</Button>
+								<Unsupported reason={UNSUPPORTED.external}>
+									<Button disabled>
+										<Icon icon={Add} data-icon="inline-start" />
+										Thêm trang
+									</Button>
+								</Unsupported>
 							}
 						/>
 					</>
@@ -141,24 +145,28 @@ async function Connections({
 				{tab === "leadforms" ? (
 					<EmptyBox
 						title="Chưa có Lead form nào được kết nối"
-						description="Kết nối Facebook Lead Ads để tiềm năng tự đổ về bảng Tiềm năng."
+						description={`Kết nối Facebook Lead Ads. ${UNSUPPORTED.external}.`}
 						action={
-							<Button disabled>
-								<Icon icon={Add} data-icon="inline-start" />
-								Thêm Lead form
-							</Button>
+							<Unsupported reason={UNSUPPORTED.external}>
+								<Button disabled>
+									<Icon icon={Add} data-icon="inline-start" />
+									Thêm Lead form
+								</Button>
+							</Unsupported>
 						}
 					/>
 				) : null}
 				{tab === "ads" ? (
 					<EmptyBox
 						title="Chưa có tài khoản quảng cáo"
-						description="Kết nối tài khoản Meta, TikTok để gửi sự kiện chuyển đổi."
+						description={`Kết nối tài khoản Meta, TikTok. ${UNSUPPORTED.external}.`}
 						action={
-							<Button disabled>
-								<Icon icon={Add} data-icon="inline-start" />
-								Thêm tài khoản
-							</Button>
+							<Unsupported reason={UNSUPPORTED.external}>
+								<Button disabled>
+									<Icon icon={Add} data-icon="inline-start" />
+									Thêm tài khoản
+								</Button>
+							</Unsupported>
 						}
 					/>
 				) : null}

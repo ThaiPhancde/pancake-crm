@@ -1,6 +1,5 @@
 "use client";
 
-import Add from "@carbon/icons-react/es/Add";
 import ArrowsVertical from "@carbon/icons-react/es/ArrowsVertical";
 import ChartBar from "@carbon/icons-react/es/ChartBar";
 import ChevronDown from "@carbon/icons-react/es/ChevronDown";
@@ -40,9 +39,20 @@ import {
 	SelectValue,
 } from "@crm/ui/components/select";
 import { cn } from "@crm/ui/lib/utils";
+import { useQueryClient } from "@tanstack/react-query";
+import type { inferRouterInputs } from "@trpc/server";
+import type { AppRouter } from "api/app-router";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
+import { useTRPC } from "@/lib/trpc/client";
 import type { FieldOption } from "./collections";
+import type { FilterField, SavedFilterState } from "./lists/config";
+import {
+	SavedFilterItems,
+	SaveFilterActions,
+	useDefaultSavedFilter,
+} from "./lists/saved-filters";
 import { RANGES } from "./range";
 
 function useParamWriter() {
@@ -201,14 +211,15 @@ export function RangeChip({
 
 export function QuickViewChip({
 	options,
-	savedFilters,
+	saved,
 }: {
 	options: FieldOption[];
-	savedFilters?: string;
+	saved?: SavedFilterState;
 }) {
 	const search = useSearchParams();
 	const write = useParamWriter();
 	const [open, setOpen] = useState(false);
+	useDefaultSavedFilter(saved);
 	const current = search.get("quick") ?? options[0]?.value ?? "";
 	const title = options.find((option) => option.value === current)?.label;
 	return (
@@ -233,10 +244,10 @@ export function QuickViewChip({
 						{option.label}
 					</DropdownMenuItem>
 				))}
-				{savedFilters ? (
+				{saved ? (
 					<>
 						<DropdownMenuSeparator />
-						<DropdownMenuItem disabled>{savedFilters}</DropdownMenuItem>
+						<SavedFilterItems saved={saved} />
 					</>
 				) : null}
 			</DropdownMenuContent>
@@ -286,68 +297,51 @@ function ToolbarIcon({
 	);
 }
 
-export function SortButton({ fields }: { fields: FieldOption[] }) {
+export function SortButton({ options }: { options: FieldOption[] }) {
 	const search = useSearchParams();
 	const write = useParamWriter();
-	const [field, direction] = (search.get("orderBy") ?? ":").split(":");
+	const fallback = options[0]?.value ?? "";
+	const current = search.get("sort") ?? fallback;
 	return (
 		<Popover>
 			<PopoverTrigger asChild>
 				<span>
-					<ToolbarIcon icon={ArrowsVertical} label="Sắp xếp" active={!!field} />
+					<ToolbarIcon
+						icon={ArrowsVertical}
+						label="Sắp xếp"
+						active={current !== fallback}
+					/>
 				</span>
 			</PopoverTrigger>
-			<PopoverContent align="end" className="w-[520px] max-w-[90vw] p-0">
+			<PopoverContent align="end" className="w-80 max-w-[90vw] p-0">
 				<div className="border-b px-4 py-3 font-semibold text-sm">Sắp xếp</div>
-				<div className="flex flex-col gap-2 p-4">
-					<div className="flex items-center gap-2">
-						<Select
-							value={field || undefined}
-							onValueChange={(value) =>
-								write({ orderBy: `${value}:${direction || "desc"}` })
-							}
-						>
-							<SelectTrigger className="flex-1">
-								<SelectValue placeholder="Chọn trường" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectGroup>
-									{fields.map((item) => (
-										<SelectItem key={item.value} value={item.value}>
-											{item.label}
-										</SelectItem>
-									))}
-								</SelectGroup>
-							</SelectContent>
-						</Select>
-						<Select
-							value={direction || undefined}
-							onValueChange={(value) =>
-								write({ orderBy: field ? `${field}:${value}` : null })
-							}
-						>
-							<SelectTrigger className="flex-1">
-								<SelectValue placeholder="Thứ tự" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectGroup>
-									<SelectItem value="asc">Tăng dần</SelectItem>
-									<SelectItem value="desc">Giảm dần</SelectItem>
-								</SelectGroup>
-							</SelectContent>
-						</Select>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label="Xoá sắp xếp"
-							onClick={() => write({ orderBy: null })}
-						>
-							<Icon icon={Close} />
-						</Button>
-					</div>
-					<Button variant="link" size="sm" className="w-fit px-0">
-						<Icon icon={Add} data-icon="inline-start" />
-						Thêm sắp xếp
+				<div className="flex items-center gap-2 p-4">
+					<Select
+						value={current}
+						onValueChange={(value) =>
+							write({ sort: value === fallback ? null : value })
+						}
+					>
+						<SelectTrigger className="flex-1">
+							<SelectValue placeholder="Chọn thứ tự" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectGroup>
+								{options.map((item) => (
+									<SelectItem key={item.value} value={item.value}>
+										{item.label}
+									</SelectItem>
+								))}
+							</SelectGroup>
+						</SelectContent>
+					</Select>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label="Xoá sắp xếp"
+						onClick={() => write({ sort: null })}
+					>
+						<Icon icon={Close} />
 					</Button>
 				</div>
 			</PopoverContent>
@@ -355,115 +349,112 @@ export function SortButton({ fields }: { fields: FieldOption[] }) {
 	);
 }
 
-const OPERATORS: FieldOption[] = [
-	{ value: "is", label: "Bằng" },
-	{ value: "contains", label: "Chứa" },
-	{ value: "empty", label: "Trống" },
-	{ value: "not-empty", label: "Không trống" },
-	{ value: "gt", label: "Lớn hơn" },
-	{ value: "lt", label: "Nhỏ hơn" },
-];
-
-export function FilterButton({ fields }: { fields: FieldOption[] }) {
+export function FilterButton({
+	fields,
+	saved,
+}: {
+	fields: FilterField[];
+	saved?: SavedFilterState;
+}) {
 	const search = useSearchParams();
 	const write = useParamWriter();
-	const [field, operator, value] = (search.get("where") ?? "::").split(":");
-	const [draft, setDraft] = useState(value ?? "");
+	const active = fields.filter((item) => search.get(item.param));
+	const [picked, setPicked] = useState<string | undefined>();
+	const field = fields.find(
+		(item) => item.param === (picked ?? active[0]?.param),
+	);
+	const value = field ? (search.get(field.param) ?? "") : "";
+	const known = field?.options.some((option) => option.value === value);
 	return (
 		<Popover>
 			<PopoverTrigger asChild>
 				<span>
-					<ToolbarIcon icon={Filter} label="Bộ lọc" active={!!field} />
+					<ToolbarIcon
+						icon={Filter}
+						label="Bộ lọc"
+						active={active.length > 0}
+					/>
 				</span>
 			</PopoverTrigger>
-			<PopoverContent align="end" className="w-[700px] max-w-[92vw] p-0">
+			<PopoverContent align="end" className="w-[620px] max-w-[92vw] p-0">
 				<div className="flex items-center gap-2 border-b px-4 py-3 font-semibold text-sm">
 					Bộ lọc
-					<span className="font-normal text-muted-foreground">
-						Đáp ứng tất cả điều kiện ▾
+					<span className="font-normal text-muted-foreground text-xs">
+						{active.length} điều kiện đang áp dụng
 					</span>
 				</div>
-				<div className="flex flex-col gap-2 p-4">
-					<div className="flex items-center gap-2">
-						<Select
-							value={field || undefined}
-							onValueChange={(next) =>
-								write({ where: `${next}:${operator || "is"}:${draft}` })
-							}
-						>
-							<SelectTrigger className="w-48">
-								<SelectValue placeholder="Chọn trường" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectGroup>
-									{fields.map((item) => (
-										<SelectItem key={item.value} value={item.value}>
-											{item.label}
-										</SelectItem>
-									))}
-								</SelectGroup>
-							</SelectContent>
-						</Select>
-						<Select
-							value={operator || undefined}
-							onValueChange={(next) =>
-								write({ where: field ? `${field}:${next}:${draft}` : null })
-							}
-						>
-							<SelectTrigger className="w-40">
-								<SelectValue placeholder="Chọn kiểu lọc" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectGroup>
-									{OPERATORS.map((item) => (
-										<SelectItem key={item.value} value={item.value}>
-											{item.label}
-										</SelectItem>
-									))}
-								</SelectGroup>
-							</SelectContent>
-						</Select>
-						<Input
-							value={draft}
-							onChange={(event) => setDraft(event.target.value)}
-							onBlur={() =>
-								field &&
-								write({ where: `${field}:${operator || "is"}:${draft}` })
-							}
-							placeholder="Nhập giá trị"
-							className="flex-1"
-						/>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label="Xoá điều kiện"
-							onClick={() => {
-								setDraft("");
-								write({ where: null });
-							}}
-						>
-							<Icon icon={Close} />
-						</Button>
-					</div>
-					<Button variant="link" size="sm" className="w-fit px-0">
-						<Icon icon={Add} data-icon="inline-start" />
-						Thêm lọc
+				<div className="flex items-center gap-2 p-4">
+					<Select
+						value={field?.param}
+						onValueChange={(next) => {
+							if (field && value && field.param !== next)
+								write({ [field.param]: null });
+							setPicked(next);
+						}}
+					>
+						<SelectTrigger className="w-44">
+							<SelectValue placeholder="Chọn trường" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectGroup>
+								{fields.map((item) => (
+									<SelectItem key={item.param} value={item.param}>
+										{item.label}
+									</SelectItem>
+								))}
+							</SelectGroup>
+						</SelectContent>
+					</Select>
+					<span className="flex h-8 items-center rounded-md border px-3 text-muted-foreground text-xs">
+						Bằng
+					</span>
+					<Select
+						value={known ? value : undefined}
+						disabled={!field}
+						onValueChange={(next) => field && write({ [field.param]: next })}
+					>
+						<SelectTrigger className="flex-1">
+							<SelectValue
+								placeholder={value ? "Nhiều giá trị" : "Chọn giá trị"}
+							/>
+						</SelectTrigger>
+						<SelectContent>
+							<SelectGroup>
+								{field?.options.map((option) => (
+									<SelectItem key={option.value} value={option.value}>
+										{option.label}
+									</SelectItem>
+								))}
+							</SelectGroup>
+						</SelectContent>
+					</Select>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label="Xoá điều kiện"
+						disabled={!field}
+						onClick={() => {
+							if (field) write({ [field.param]: null });
+							setPicked(undefined);
+						}}
+					>
+						<Icon icon={Close} />
 					</Button>
 				</div>
-				<div className="flex items-center justify-between border-t px-4 py-3 text-xs">
+				<div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-xs">
 					<button
 						type="button"
 						className="hover:underline"
 						onClick={() => {
-							setDraft("");
-							write({ where: null });
+							setPicked(undefined);
+							write(
+								Object.fromEntries(fields.map((item) => [item.param, null])),
+							);
 						}}
 					>
 						Xóa tất cả
 					</button>
-					<span className="text-muted-foreground">
-						Lưu thành bộ lọc mặc định
-					</span>
+					{saved ? <SaveFilterActions saved={saved} /> : null}
 				</div>
 			</PopoverContent>
 		</Popover>
@@ -527,7 +518,37 @@ export function ViewSwitch({
 	);
 }
 
-export function MoreMenu() {
+export type ExportRequest =
+	inferRouterInputs<AppRouter>["pancake"]["exportCsv"];
+
+export function MoreMenu({ exportRequest }: { exportRequest?: ExportRequest }) {
+	const api = useTRPC();
+	const queryClient = useQueryClient();
+	const [pending, setPending] = useState(false);
+	async function download(request: ExportRequest) {
+		setPending(true);
+		try {
+			const file = await queryClient.fetchQuery({
+				...api.pancake.exportCsv.queryOptions(request),
+				staleTime: 0,
+			});
+			const url = URL.createObjectURL(
+				new Blob([file.content], { type: file.mimeType }),
+			);
+			const link = document.createElement("a");
+			link.href = url;
+			link.download = file.filename;
+			link.click();
+			URL.revokeObjectURL(url);
+			if (file.truncated)
+				toast.warning(`File chỉ gồm ${file.rows} dòng đầu tiên.`);
+			else toast.success(`Đã xuất ${file.rows} dòng`);
+		} catch {
+			toast.error("Không thể xuất file. Vui lòng thử lại.");
+		} finally {
+			setPending(false);
+		}
+	}
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
@@ -536,9 +557,12 @@ export function MoreMenu() {
 				</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end">
-				<DropdownMenuItem disabled>
+				<DropdownMenuItem
+					disabled={!exportRequest || pending}
+					onSelect={() => exportRequest && download(exportRequest)}
+				>
 					<Icon icon={Download} />
-					Xuất excel
+					{pending ? "Đang xuất…" : "Xuất excel"}
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>

@@ -16,10 +16,12 @@ import {
 	MoreMenu,
 	QuickViewChip,
 	SearchBox,
-	SortButton,
 } from "@/components/shop/filter-bar";
 import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
+import { DetailFields } from "@/components/shop/lists/detail-fields";
+import { loadSavedFilters } from "@/components/shop/lists/saved-filters-server";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
+import { OrderDetailSheet } from "@/components/shop/order-detail-sheet";
 import { ShopPage, ShopPageBody, ShopPageHeader } from "@/components/shop/page";
 import { type SearchValues, text, withParams } from "@/components/shop/params";
 import { RecordQuickEdit } from "@/components/shop/record-quick-edit";
@@ -46,24 +48,35 @@ async function Tickets({
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const pageNum = Math.max(1, Number(text(values, "page") || "1"));
-	const [sellers, tickets, customers] = await Promise.all([
+	const page = `${ctx.base}/tickets`;
+	const ticketId = text(values, "ticketId");
+	const recordInput = {
+		shopId: ctx.shopId,
+		q: text(values, "q"),
+		status: text(values, "status") || undefined,
+		assigneeId: text(values, "assignee") || undefined,
+		priority: text(values, "priority") || undefined,
+		category: text(values, "category") || undefined,
+		quick: text(values, "quick") || undefined,
+	};
+	const [sellers, tickets, customers, saved] = await Promise.all([
 		ctx.api.sellers.query({ shopId: ctx.shopId }),
-		ctx.api.tickets.query({
-			shopId: ctx.shopId,
-			q: text(values, "q"),
-			status: text(values, "status") || undefined,
-			assigneeId: text(values, "assignee") || undefined,
-			priority: text(values, "priority") || undefined,
-			category: text(values, "category") || undefined,
-			quick: text(values, "quick") || undefined,
-			page: pageNum,
-			pageSize: 25,
-		}),
+		ctx.api.tickets.query({ ...recordInput, page: pageNum, pageSize: 25 }),
 		ctx.api.customers.query({
 			shopId: ctx.shopId,
 			pageSize: PANCAKE.maxListSize,
 		}),
+		loadSavedFilters(ctx.shopId, "tickets"),
 	]);
+	const selected = ticketId
+		? (tickets.rows.find((row) => row.id === ticketId) ??
+			(
+				await ctx.api.tickets.query({
+					shopId: ctx.shopId,
+					pageSize: PANCAKE.maxListSize,
+				})
+			).rows.find((row) => row.id === ticketId))
+		: undefined;
 	const staff = sellers.map((seller) => ({
 		value: seller.employeeId,
 		label: seller.name,
@@ -103,16 +116,41 @@ async function Tickets({
 					toolbar={
 						<>
 							<SearchBox className="w-56" />
-							<SortButton
-								fields={columns.map((c) => ({ value: c.key, label: c.label }))}
-							/>
 							<FilterButton
-								fields={collection.fields.map((f) => ({
-									value: f.key,
-									label: f.label,
-								}))}
+								saved={saved}
+								fields={[
+									{
+										param: "status",
+										label: "Trạng thái",
+										options: TICKET_STATUSES,
+									},
+									{
+										param: "priority",
+										label: "Ưu tiên",
+										options: TICKET_PRIORITIES,
+									},
+									{
+										param: "category",
+										label: "Danh mục",
+										options: TICKET_CATEGORIES,
+									},
+									{
+										param: "assignee",
+										label: "Phân công",
+										options: [
+											{ value: "none", label: "Chưa được phân công" },
+											...staff,
+										],
+									},
+								]}
 							/>
-							<MoreMenu />
+							<MoreMenu
+								exportRequest={{
+									kind: "tickets",
+									shopId: ctx.shopId,
+									filters: recordInput,
+								}}
+							/>
 						</>
 					}
 				>
@@ -121,6 +159,7 @@ async function Tickets({
 							{ value: "all", label: "Tất cả vấn đề" },
 							{ value: "overdue", label: "Quá hạn" },
 						]}
+						saved={saved}
 					/>
 					<FilterChip
 						label="Ưu tiên"
@@ -156,12 +195,20 @@ async function Tickets({
 				</FilterBar>
 				<ListTable
 					columns={columns}
+					bulk={{
+						shopId: ctx.shopId,
+						entity: "ticket",
+						statuses: TICKET_STATUSES,
+						staff,
+						canWrite: tickets.canWrite,
+					}}
 					rows={tickets.rows.map((ticket) => {
 						const prioOpt = TICKET_PRIORITIES.find(
 							(p) => p.value === ticket.priority,
 						);
 						return {
 							key: ticket.id,
+							href: withParams(page, values, { ticketId: ticket.id }),
 							cells: [
 								`#${ticket.id.slice(-6).toUpperCase()}`,
 								ticket.title,
@@ -207,11 +254,68 @@ async function Tickets({
 					page={pageNum}
 					pageSize={25}
 					unit="vấn đề"
-					pageHref={(next) =>
-						withParams(`${ctx.base}/tickets`, values, { page: String(next) })
-					}
+					pageHref={(next) => withParams(page, values, { page: String(next) })}
 				/>
 			</ShopPageBody>
+			{selected ? (
+				<OrderDetailSheet
+					title={`Vấn đề #${selected.id.slice(-6).toUpperCase()} · ${selected.title}`}
+					closeHref={withParams(page, values, { ticketId: "" })}
+				>
+					<DetailFields
+						items={[
+							{ label: "Tiêu đề", value: selected.title },
+							{ label: "Liên hệ", value: selected.contactName },
+							{ label: "Số điện thoại", value: selected.phone },
+							{ label: "Email", value: selected.email },
+							{
+								label: "Danh mục",
+								value: selected.category
+									? optionLabel(TICKET_CATEGORIES, selected.category, "")
+									: null,
+							},
+							{
+								label: "Ưu tiên",
+								value: optionLabel(TICKET_PRIORITIES, selected.priority, ""),
+							},
+							{
+								label: "Trạng thái",
+								value: (
+									<RecordQuickEdit
+										kind="ticket"
+										field="status"
+										id={selected.id}
+										shopId={ctx.shopId}
+										value={selected.status}
+										options={TICKET_STATUSES}
+										disabled={!tickets.canWrite}
+									/>
+								),
+							},
+							{
+								label: "Phân công",
+								value: (
+									<RecordQuickEdit
+										kind="ticket"
+										field="assigneeId"
+										id={selected.id}
+										shopId={ctx.shopId}
+										value={selected.assigneeId}
+										options={staff}
+										disabled={!tickets.canWrite}
+									/>
+								),
+							},
+							{
+								label: "Hạn xử lý",
+								value: selected.dueAt ? formatDate(selected.dueAt) : null,
+							},
+							{ label: "Ngày tạo", value: formatDate(selected.createdAt) },
+							{ label: "Mô tả", value: selected.description || null },
+						]}
+					/>
+				</OrderDetailSheet>
+			) : null}
 		</ShopPage>
 	);
 }

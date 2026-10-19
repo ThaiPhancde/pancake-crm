@@ -32,12 +32,13 @@ import {
 } from "@crm/ui/components/tooltip";
 import { cn } from "@crm/ui/lib/utils";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { type User, UserMenu } from "@/components/app-header";
 import { signOutAndRedirect } from "@/lib/sign-out";
 import { AutomationCenter } from "./automation-center";
+import { GlobalSearch } from "./inbox/global-search";
 import { type NavItem, SHOP_NAV } from "./nav";
 import { NotificationPanel } from "./notification-panel";
 import { shopInitial } from "./shop-profile";
@@ -296,11 +297,9 @@ export function ShopShell({
 	children: React.ReactNode;
 }) {
 	const pathname = usePathname();
-	const router = useRouter();
 	const base = shopUrl(slug, shop.id);
 	const [collapsed, setCollapsed] = useState(false);
 	const [mobileOpen, setMobileOpen] = useState(false);
-	const [query, setQuery] = useState("");
 
 	return (
 		<div className="theme-shop flex h-svh bg-background text-foreground">
@@ -385,31 +384,10 @@ export function ShopShell({
 					>
 						<Icon icon={Menu} />
 					</Button>
-					<form
-						className="relative hidden w-full max-w-xl sm:block"
-						onSubmit={(event) => {
-							event.preventDefault();
-							if (query.trim())
-								router.push(
-									`${base}/contacts?q=${encodeURIComponent(query.trim())}`,
-								);
-						}}
-					>
-						<Icon
-							icon={Search}
-							className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-sidebar-foreground/70"
-						/>
-						<input
-							value={query}
-							onChange={(event) => setQuery(event.target.value)}
-							placeholder="Tìm kiếm"
-							aria-label="Tìm kiếm liên hệ, đơn hàng"
-							className="h-8 w-full rounded-full bg-white/10 pr-4 pl-9 text-sidebar-foreground text-sm outline-none placeholder:text-sidebar-foreground/60 focus:bg-white/15"
-						/>
-					</form>
+					<GlobalSearch shopId={shop.id} base={base} />
 					<div className="ml-auto flex items-center gap-1">
-						<AutomationCenter />
-						<NotificationPanel />
+						<AutomationCenter shopId={shop.id} />
+						<NotificationPanel shopId={shop.id} base={base} />
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button

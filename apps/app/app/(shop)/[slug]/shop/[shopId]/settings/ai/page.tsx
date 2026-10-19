@@ -2,6 +2,8 @@ import { Button } from "@crm/ui/components/button";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
+import { UNSUPPORTED } from "@/components/shop/settings/config";
+import { Unsupported } from "@/components/shop/settings/unsupported";
 import { SettingsFrame } from "@/components/shop/settings-frame";
 
 const FEATURES = [
@@ -62,7 +64,10 @@ async function Ai({ params }: { params: Promise<ShopRoute> }) {
 					</div>
 				))}
 			</div>
-			<Button disabled>Bắt đầu thiết lập</Button>
+			<Unsupported reason={UNSUPPORTED.feature}>
+				<Button disabled>Bắt đầu thiết lập</Button>
+			</Unsupported>
+			<p className="text-muted-foreground text-xs">{UNSUPPORTED.feature}</p>
 		</SettingsFrame>
 	);
 }

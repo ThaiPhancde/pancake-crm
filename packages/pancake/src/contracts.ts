@@ -1,5 +1,6 @@
+import type { JsonValue } from "@crm/db";
 import { z } from "zod";
-import { PANCAKE } from "./config";
+import { PANCAKE, PERMISSION_ENTITIES } from "./config";
 
 export const sourceId = z
 	.union([z.string().min(1), z.number().int().safe()])
@@ -278,6 +279,11 @@ export const listInput = z
 	})
 	.refine((v) => !v.from || !v.to || v.from <= v.to, "Invalid date range");
 export type ListInput = z.infer<typeof listInput>;
+export const GROUPINGS = ["day", "week", "month"] as const;
+export type Grouping = (typeof GROUPINGS)[number];
+export const businessReportInput = listInput.safeExtend({
+	grouping: z.enum(GROUPINGS).default("day"),
+});
 export const roleInput = z
 	.object({
 		shopId: z.string().min(1),
@@ -369,6 +375,22 @@ export const updateTicketInput = z.object({
 	assigneeId: assignableText(120),
 	dueAt: z.iso.datetime({ offset: true }).nullable().optional(),
 });
+export const bulkUpdateInput = z
+	.object({
+		shopId: z.string().min(1),
+		entity: z.enum(["lead", "appointment", "ticket"]),
+		ids: z.array(z.string().min(1)).min(1).max(PANCAKE.bulkMax),
+		status: z.string().trim().min(1).max(80).optional(),
+		assigneeId: assignableText(120),
+	})
+	.refine(
+		(v) => v.status !== undefined || v.assigneeId !== undefined,
+		"Nothing to update",
+	);
+export const recordRefInput = z.object({
+	shopId: z.string().min(1),
+	id: z.string().min(1),
+});
 export const createLeadInput = z.object({
 	shopId: z.string().min(1),
 	name: z.string().trim().min(1).max(160),
@@ -431,3 +453,104 @@ export function isNewer(
 	if (current.sourceUpdatedAt && !sourceUpdatedAt) return false;
 	return fetchedAt > current.fetchedAt;
 }
+
+export const permissionRights = z.object({
+	configure: z.boolean(),
+	view: z.boolean(),
+	edit: z.boolean(),
+	delete: z.boolean(),
+	create: z.boolean(),
+	export: z.boolean(),
+});
+export const permissionMatrix = z.partialRecord(
+	z.enum(PERMISSION_ENTITIES),
+	permissionRights,
+);
+export type PermissionMatrix = z.infer<typeof permissionMatrix>;
+
+export function parsePermissionMatrix(value: JsonValue): PermissionMatrix {
+	return permissionMatrix.parse(value);
+}
+
+export const AUTOMATION_TRIGGERS = [
+	"record_created",
+	"record_updated",
+	"appointment_due",
+	"birthday",
+	"converted",
+] as const;
+export const AUTOMATION_ENTITIES = [
+	"lead",
+	"appointment",
+	"ticket",
+	"contact",
+	"order",
+] as const;
+export const AUTOMATION_ACTIONS = [
+	"notify_assignee",
+	"assign_to",
+	"send_email",
+	"zalo_friend",
+	"botcake_message",
+	"json_api",
+] as const;
+const configText = (max: number) => z.string().trim().max(max);
+export const automationRule = z.discriminatedUnion("action", [
+	z.object({
+		action: z.literal("notify_assignee"),
+		config: z.object({
+			title: configText(160).optional(),
+			body: configText(2000).optional(),
+		}),
+	}),
+	z.object({
+		action: z.literal("assign_to"),
+		config: z.object({ assigneeId: z.string().trim().min(1).max(120) }),
+	}),
+	z.object({
+		action: z.literal("send_email"),
+		config: z.object({
+			to: z.email().optional(),
+			subject: configText(200).min(1),
+			body: configText(5000),
+		}),
+	}),
+	z.object({
+		action: z.literal("zalo_friend"),
+		config: z.object({ message: configText(1000).optional() }),
+	}),
+	z.object({
+		action: z.literal("botcake_message"),
+		config: z.object({
+			flowId: configText(120).min(1),
+			message: configText(1000).optional(),
+		}),
+	}),
+	z.object({
+		action: z.literal("json_api"),
+		config: z.object({
+			url: z.url({ protocol: /^https$/ }),
+			method: z.enum(["POST", "PUT", "PATCH"]).default("POST"),
+			headers: z.record(z.string().max(120), z.string().max(2000)).default({}),
+		}),
+	}),
+]);
+export type AutomationRule = z.infer<typeof automationRule>;
+
+export function parseAutomationRule(action: string, config: JsonValue) {
+	return automationRule.parse({ action, config });
+}
+
+export const savedFilterParams = z.record(
+	z.string().min(1).max(40),
+	z.string().max(2000),
+);
+
+export function parseSavedFilterParams(value: JsonValue) {
+	return savedFilterParams.parse(value);
+}
+
+export const customerProfileWire = customerWire.pick({
+	gender: true,
+	date_of_birth: true,
+});

@@ -12,6 +12,7 @@ import {
 	type ShopGrant,
 	shopGrants,
 } from "./access";
+import { writeAudit } from "./admin";
 import {
 	ORDER_VIEWS,
 	PANCAKE,
@@ -27,6 +28,7 @@ import {
 	type createTicketInput,
 	customerWire,
 	employeeWire,
+	type Grouping,
 	type ListInput,
 	orderWire,
 	productWire,
@@ -154,6 +156,30 @@ export function fillDays<T>(
 	return [...new Set([...days, ...known])]
 		.sort()
 		.map((day) => buckets.get(day) ?? empty(day));
+}
+
+export function bucketStart(day: string, grouping: Grouping): string {
+	if (grouping === "month") return `${day.slice(0, 7)}-01`;
+	if (grouping === "day") return day;
+	const at = Date.parse(`${day}T00:00:00Z`);
+	const weekday = new Date(at).getUTCDay();
+	return new Date(at - ((weekday + 6) % 7) * PANCAKE.dayMs)
+		.toISOString()
+		.slice(0, 10);
+}
+
+export function groupSeries<T extends { date: string }>(
+	days: T[],
+	grouping: Grouping,
+	add: (into: T, row: T) => T,
+): T[] {
+	const buckets = new Map<string, T>();
+	for (const row of days) {
+		const date = bucketStart(row.date, grouping);
+		const current = buckets.get(date);
+		buckets.set(date, current ? add(current, row) : { ...row, date });
+	}
+	return [...buckets.values()];
 }
 
 function bookedWhere(): Prisma.PancakeOrderWhereInput {
@@ -425,6 +451,33 @@ function spendAmounts(
 	}));
 }
 
+export function customerScope(
+	grants: ShopGrant[],
+	shopId?: string,
+): Prisma.PancakeCustomerWhereInput {
+	orderScope(grants, shopId);
+	const selected = shopId
+		? grants.filter((grant) => grant.shopId === shopId)
+		: grants;
+	return {
+		OR: selected.map((grant) =>
+			grant.role === "TELESALE"
+				? {
+						shopId: grant.shopId,
+						OR: [
+							{ assignedEmployeeId: grant.employeeId ?? "__unmapped__" },
+							{
+								orders: {
+									some: { sellerId: grant.employeeId ?? "__unmapped__" },
+								},
+							},
+						],
+					}
+				: { shopId: grant.shopId },
+		),
+	};
+}
+
 export async function listCustomers(db: Db, userId: string, input: ListInput) {
 	const grants = await shopGrants(db, userId);
 	const oScope = orderScope(grants, input.shopId);
@@ -435,23 +488,7 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 	const now = new Date();
 	const where: Prisma.PancakeCustomerWhereInput = {
 		AND: [
-			{
-				OR: selected.map((grant) =>
-					grant.role === "TELESALE"
-						? {
-								shopId: grant.shopId,
-								OR: [
-									{ assignedEmployeeId: grant.employeeId ?? "__unmapped__" },
-									{
-										orders: {
-											some: { sellerId: grant.employeeId ?? "__unmapped__" },
-										},
-									},
-								],
-							}
-						: { shopId: grant.shopId },
-				),
-			},
+			customerScope(grants, input.shopId),
 			inListOrNone(
 				input.sellerId,
 				(ids) => ({ assignedEmployeeId: { in: ids } }),
@@ -1008,7 +1045,10 @@ const dailyRow = z.object({
 	received: z.number(),
 });
 
-function orderSqlWhere(grants: ShopGrant[], input: ListInput): Prisma.Sql {
+export function orderSqlWhere(
+	grants: ShopGrant[],
+	input: ListInput,
+): Prisma.Sql {
 	const selected = input.shopId
 		? grants.filter((grant) => grant.shopId === input.shopId)
 		: grants;
@@ -1113,7 +1153,7 @@ function amounts(totals: Map<string, Prisma.Decimal>) {
 export async function dashboardReport(
 	db: Db,
 	userId: string,
-	input: ListInput,
+	input: ListInput & { grouping?: Grouping },
 ) {
 	const grants = await shopGrants(db, userId);
 	orderScope(grants, input.shopId);
@@ -1212,11 +1252,20 @@ export async function dashboardReport(
 		now,
 		seriesCurrency,
 	);
+	const grouping = input.grouping ?? "day";
 	return {
 		orders,
 		delivered,
 		cancelled,
 		returned,
+		grouping,
+		series: groupSeries(dailySeries, grouping, (into, row) => ({
+			date: into.date,
+			orders: into.orders + row.orders,
+			delivered: into.delivered + row.delivered,
+			revenue: into.revenue + row.revenue,
+			received: into.received + row.received,
+		})),
 		timezone: shopTimezone(input.shopId),
 		revenue: amounts(booked),
 		receivedRevenue: amounts(collected),
@@ -1339,6 +1388,17 @@ export async function setMembership(
 		select: { shopId: true, userId: true, role: true, employeeId: true },
 	});
 	clearShopGrantsCache(input.userId);
+	const target = await db.user.findUnique({
+		where: { id: input.userId },
+		select: { name: true },
+	});
+	await writeAudit(db, {
+		shopId: input.shopId,
+		userId,
+		area: "permission",
+		action: "membership",
+		summary: `Đặt vai trò ${input.role} cho ${target?.name ?? input.userId}`,
+	});
 	return result;
 }
 
@@ -1411,6 +1471,13 @@ export async function approveEmployee(
 		select: { shopId: true, userId: true, role: true, employeeId: true },
 	});
 	clearShopGrantsCache(targetUser.id);
+	await writeAudit(db, {
+		shopId: input.shopId,
+		userId,
+		area: "permission",
+		action: "approve",
+		summary: `Duyệt nhân viên ${emp.name} với vai trò ${input.role}`,
+	});
 	return result;
 }
 
@@ -1494,7 +1561,7 @@ export async function membershipOptions(
 
 const leadFields = z.record(z.string(), z.string()).catch({});
 
-function leadRow<
+export function leadRow<
 	T extends { fields: Prisma.JsonValue; createdAt: Date; updatedAt: Date },
 >(row: T) {
 	return {

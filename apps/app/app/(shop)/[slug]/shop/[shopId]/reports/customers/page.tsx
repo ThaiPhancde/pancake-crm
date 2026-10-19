@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
+import { formatAmount } from "@/components/pancake/format";
 import { LEAD_STATUSES } from "@/components/shop/collections";
 import { ListTable } from "@/components/shop/list-table";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
@@ -18,6 +19,12 @@ import {
 	ReportPage,
 } from "@/components/shop/report";
 import { countBars } from "@/components/shop/report-bars";
+import {
+	AGE_ROWS,
+	GENDER_ROWS,
+	PURCHASE_ROWS,
+	REPORTS,
+} from "@/components/shop/reports/config";
 import { SettingsTabs } from "@/components/shop/settings-frame";
 
 export default function CustomersReportPage(props: {
@@ -31,14 +38,13 @@ export default function CustomersReportPage(props: {
 	);
 }
 
-const AGES = [
-	"Dưới 18 tuổi",
-	"Từ 18 đến 24 tuổi",
-	"Từ 25 đến 34 tuổi",
-	"Từ 35 đến 44 tuổi",
-	"Từ 45 đến 54 tuổi",
-	"Trên 55 tuổi",
-];
+function shareText(value: number) {
+	return `${value.toLocaleString("vi-VN")} %`;
+}
+
+function percentOf(part: number, total: number) {
+	return total ? Number(((REPORTS.percentScale * part) / total).toFixed(1)) : 0;
+}
 
 async function Customers({
 	params,
@@ -50,18 +56,14 @@ async function Customers({
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const filter = shopFilters(values, ctx.shopId, "week");
 	const tab = text(values, "tab") === "leads" ? "leads" : "contacts";
-	const [customers, leads] = await Promise.all([
-		ctx.api.customers.query({
-			...filter.input,
-			pageSize: 1,
-		}),
-		tab === "leads"
-			? ctx.api.leadReport.query({
-					shopId: ctx.shopId,
-					from: filter.input.from,
-					to: filter.input.to,
-				})
-			: undefined,
+	const period = {
+		shopId: ctx.shopId,
+		from: filter.input.from,
+		to: filter.input.to,
+	};
+	const [audience, leads] = await Promise.all([
+		ctx.api.customerReport.query(period),
+		tab === "leads" ? ctx.api.leadReport.query(period) : undefined,
 	]);
 	const leadCount = (status: string) =>
 		leads?.byStatus.find((row) => row.status === status)?.count ?? 0;
@@ -70,6 +72,37 @@ async function Customers({
 		count: row.count,
 	}));
 	const page = `${ctx.base}/reports/customers`;
+	const genders = GENDER_ROWS.map((row) => {
+		const found = audience.gender.find((item) => item.gender === row.key);
+		return {
+			label: row.label,
+			color: row.color,
+			count: found?.count ?? 0,
+			share: shareText(found?.share ?? 0),
+		};
+	});
+	const ages = AGE_ROWS.map((row) => {
+		const found = audience.age.find((item) => item.bucket === row.key);
+		return {
+			label: row.label,
+			color: row.color,
+			count: found?.count ?? 0,
+			share: shareText(found?.share ?? 0),
+		};
+	});
+	const purchases = PURCHASE_ROWS.map((row) => ({
+		row,
+		found: audience.purchases.find((item) => item.bucket === row.key),
+	}));
+	const revenueByCurrency = new Map<string, number>();
+	for (const { found } of purchases)
+		for (const amount of found?.revenue ?? [])
+			revenueByCurrency.set(
+				amount.currency,
+				(revenueByCurrency.get(amount.currency) ?? 0) + Number(amount.amount),
+			);
+	const firstTime =
+		audience.purchases.find((item) => item.bucket === "1")?.customers ?? 0;
 
 	return (
 		<ReportPage title="Báo cáo khách hàng" timeZone={filter.timeZone}>
@@ -101,40 +134,26 @@ async function Customers({
 									},
 								]
 							: [
-									{ label: "Số liên hệ", value: customers.total },
-									{ label: "LH có tương tác", value: "—" },
-									{ label: "LH lần đầu mua", value: "—" },
-									{ label: "LH mua lại", value: "—" },
+									{ label: "Tổng số liên hệ", value: audience.totalCustomers },
+									{ label: "LH đã mua hàng", value: audience.buyers },
+									{ label: "LH mua 1 lần", value: firstTime },
+									{
+										label: "LH mua từ 2 lần",
+										value: Math.max(0, audience.buyers - firstTime),
+									},
 								]
 					}
 				/>
 			</ReportCard>
 			<div className="grid gap-3 lg:grid-cols-2">
-				<ReportCard title="Giới tính">
-					<Breakdown
-						title="Giới tính"
-						rows={[
-							{ label: "Nam", color: "#1d4ed8", count: 0, share: "0 %" },
-							{ label: "Nữ", color: "#ef4444", count: 0, share: "0 %" },
-							{
-								label: "Chưa có thông tin",
-								color: "#9ca3af",
-								count: tab === "contacts" ? customers.total : 0,
-								share: tab === "contacts" && customers.total ? "100 %" : "0 %",
-							},
-						]}
-					/>
+				<ReportCard
+					title="Giới tính"
+					description="Trên toàn bộ liên hệ của shop"
+				>
+					<Breakdown title="Giới tính" rows={genders} />
 				</ReportCard>
-				<ReportCard title="Độ tuổi">
-					<div className="h-2 rounded-full bg-muted" />
-					<ul className="flex flex-col gap-2 text-xs">
-						{AGES.map((age) => (
-							<li key={age} className="flex items-center justify-between">
-								<span>{age}</span>
-								<span className="text-success tabular-nums">0</span>
-							</li>
-						))}
-					</ul>
+				<ReportCard title="Độ tuổi" description="Trên toàn bộ liên hệ của shop">
+					<Breakdown title="Độ tuổi" rows={ages} />
 				</ReportCard>
 			</div>
 			{tab === "leads" ? (
@@ -179,13 +198,35 @@ async function Customers({
 							{ key: "revenue", label: "Doanh thu", className: "text-right" },
 							{ key: "revenueShare", label: "Tỷ lệ", className: "text-right" },
 						]}
-						rows={["1", "2", "3", "4", "> 4"].map((times) => ({
-							key: times,
-							cells: [times, 0, "0 %", "—", "0 %"],
+						rows={purchases.map(({ row, found }) => ({
+							key: row.key,
+							cells: [
+								row.label,
+								found?.customers ?? 0,
+								shareText(found?.share ?? 0),
+								found?.revenue.length
+									? found.revenue
+											.map((item) => formatAmount(item.amount, item.currency))
+											.join(" · ")
+									: "—",
+								found?.revenue.length
+									? found.revenue
+											.map((item) =>
+												shareText(
+													percentOf(
+														Number(item.amount),
+														revenueByCurrency.get(item.currency) ?? 0,
+													),
+												),
+											)
+											.join(" · ")
+									: shareText(0),
+							],
 						}))}
 					/>
 					<p className="text-muted-foreground text-xs">
-						Phân tích số lần mua cần backend gộp đơn theo số điện thoại.
+						Số lần mua tính trên đơn không hủy của liên hệ trong khoảng thời
+						gian. Doanh thu tách theo tiền tệ.
 					</p>
 				</ReportCard>
 			)}

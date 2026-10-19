@@ -1,5 +1,4 @@
 import Add from "@carbon/icons-react/es/Add";
-import Checkmark from "@carbon/icons-react/es/Checkmark";
 import Email from "@carbon/icons-react/es/Email";
 import Events from "@carbon/icons-react/es/Events";
 import Folder from "@carbon/icons-react/es/Folder";
@@ -27,6 +26,13 @@ import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
+import type { MemberRef } from "@/components/shop/admin/branch-manager";
+import { MemberAccess } from "@/components/shop/admin/member-access";
+import {
+	PermissionGrid,
+	ProfileManager,
+	ProfilesNotEnforced,
+} from "@/components/shop/admin/profile-manager";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { type SearchValues, text, withParams } from "@/components/shop/params";
 import { SettingsFrame } from "@/components/shop/settings-frame";
@@ -34,117 +40,6 @@ import { requireSession } from "@/lib/session";
 import { getServerTrpcClient } from "@/lib/trpc/server";
 
 type Role = "MANAGER" | "TELESALE" | "VIEWER";
-
-type ProfileDef = {
-	key: string;
-	label: string;
-	role: Role;
-	description: string;
-};
-
-const PROFILES: ProfileDef[] = [
-	{
-		key: "ceo",
-		label: "CEO",
-		role: "MANAGER",
-		description:
-			"Toàn quyền quản trị hệ thống, cấu hình bảng, phân quyền nhân sự và xem báo cáo toàn doanh nghiệp.",
-	},
-	{
-		key: "admin",
-		label: "Admin",
-		role: "MANAGER",
-		description:
-			"Quản trị viên hệ thống, được phép cấu hình bảng dữ liệu, quản lý chi nhánh và xuất dữ liệu.",
-	},
-	{
-		key: "sale-manager",
-		label: "Sale Manager",
-		role: "MANAGER",
-		description:
-			"Trưởng nhóm kinh doanh, quản lý toàn bộ đơn hàng, liên hệ, tiềm năng và hiệu suất đội ngũ sale.",
-	},
-	{
-		key: "telesale",
-		label: "Telesale",
-		role: "TELESALE",
-		description:
-			"Nhân viên tư vấn & chốt đơn, xử lý các đơn hàng, tiềm năng và liên hệ được phân công.",
-	},
-	{
-		key: "viewer",
-		label: "Người xem",
-		role: "VIEWER",
-		description:
-			"Chỉ có quyền xem dữ liệu trên shop, không được chỉnh sửa hoặc xóa bản ghi.",
-	},
-];
-
-const TABLES = [
-	{ key: "task", label: "Nhiệm vụ", icon: "📋", configurable: false },
-	{ key: "ticket", label: "Vấn đề", icon: "🎫", configurable: false },
-	{ key: "opportunity", label: "Cơ hội", icon: "🎯", configurable: true },
-	{ key: "order", label: "Đơn hàng", icon: "🛒", configurable: true },
-	{ key: "appointment", label: "Lịch hẹn", icon: "📅", configurable: false },
-	{ key: "contract", label: "Hợp đồng", icon: "📄", configurable: false },
-	{ key: "lead", label: "Tiềm năng", icon: "🧩", configurable: true },
-	{ key: "contact", label: "Liên hệ", icon: "👥", configurable: true },
-	{ key: "company", label: "Công ty", icon: "🏢", configurable: true },
-];
-
-const ACTIONS = [
-	"Cấu hình",
-	"Xem",
-	"Chỉnh sửa",
-	"Xóa",
-	"Tạo mới",
-	"Xuất dữ liệu",
-];
-
-const FALLBACK_PROFILE: ProfileDef = {
-	key: "viewer",
-	label: "Người xem",
-	role: "VIEWER",
-	description:
-		"Chỉ có quyền xem dữ liệu trên shop, không được chỉnh sửa hoặc xóa bản ghi.",
-};
-
-function profileAt(index: number): ProfileDef {
-	return PROFILES[index] ?? PROFILES[0] ?? FALLBACK_PROFILE;
-}
-
-function allowed(
-	profileKey: string,
-	role: Role,
-	action: string,
-	configurable: boolean,
-): boolean {
-	if (action === "Cấu hình") {
-		if (!configurable) return false;
-		return (
-			role === "MANAGER" &&
-			["ceo", "admin", "sale-manager"].includes(profileKey)
-		);
-	}
-	if (role === "MANAGER") {
-		if (profileKey === "sale-manager" && action === "Xóa") return false;
-		return true;
-	}
-	if (role === "TELESALE") {
-		return ["Xem", "Chỉnh sửa", "Tạo mới"].includes(action);
-	}
-	return action === "Xem";
-}
-
-function profileForEmployee(role: Role, roleCode: string | null): ProfileDef {
-	if (role === "MANAGER") {
-		if (roleCode === "1") return profileAt(0);
-		if (roleCode === "2") return profileAt(1);
-		return profileAt(2);
-	}
-	if (role === "TELESALE") return profileAt(3);
-	return profileAt(4);
-}
 
 export default function PermissionsPage(props: {
 	params: Promise<ShopRoute>;
@@ -183,6 +78,34 @@ async function Permissions({
 	}
 
 	const shopId = ctx.shopId;
+	const settings = getServerTrpcClient().pancakeSettings;
+	const [profiles, branches] = await Promise.all([
+		settings.profiles.query({ shopId }),
+		settings.branches.query({ shopId }),
+	]);
+	const profileByUser = new Map(
+		profiles.flatMap((profile) =>
+			profile.memberUserIds.map((userId) => [userId, profile] as const),
+		),
+	);
+	const shopUserIds = new Set(options.members.map((member) => member.userId));
+	const employeeIds = new Set(
+		options.employees.map((employee) => employee.employeeId),
+	);
+	const accessBranches = branches.map((branch) => ({
+		id: branch.id,
+		name: branch.name,
+		isDefault: branch.isDefault,
+		members: branch.members.flatMap((member): MemberRef[] =>
+			member.userId
+				? shopUserIds.has(member.userId)
+					? [{ userId: member.userId }]
+					: []
+				: member.employeeId && employeeIds.has(member.employeeId)
+					? [{ employeeId: member.employeeId }]
+					: [],
+		),
+	}));
 	const activeTab = text(values, "tab") === "profiles" ? "profiles" : "staff";
 	const searchQ = text(values, "q").toLowerCase();
 
@@ -201,7 +124,6 @@ async function Permissions({
 		const isManager = emp.roleCode === "1" || emp.roleCode === "2";
 		const effectiveRole: Role =
 			mappedMember?.role ?? (isManager ? "MANAGER" : "TELESALE");
-		const profile = profileForEmployee(effectiveRole, emp.roleCode);
 		return {
 			key: emp.employeeId,
 			employeeId: emp.employeeId,
@@ -213,7 +135,6 @@ async function Permissions({
 			avatarUrl: emp.avatarUrl ?? mappedUser?.image ?? null,
 			department: emp.department,
 			role: effectiveRole,
-			profile,
 			approved: Boolean(mappedMember),
 		};
 	});
@@ -223,7 +144,6 @@ async function Permissions({
 			continue;
 		const u = userById.get(member.userId);
 		if (!u) continue;
-		const profile = profileForEmployee(member.role, "1");
 		staffEntries.unshift({
 			key: `user:${u.id}`,
 			employeeId: member.employeeId ?? "",
@@ -235,7 +155,6 @@ async function Permissions({
 			avatarUrl: u.image,
 			department: "Quản trị",
 			role: member.role,
-			profile,
 			approved: true,
 		});
 	}
@@ -255,9 +174,10 @@ async function Permissions({
 	const selectedKey = text(values, "user") || filteredStaff[0]?.key || "";
 	const selectedStaff =
 		filteredStaff.find((s) => s.key === selectedKey) ?? filteredStaff[0];
-	const selectedProfileKey = text(values, "profile") || profileAt(0).key;
-	const activeProfile =
-		PROFILES.find((p) => p.key === selectedProfileKey) ?? profileAt(0);
+	const selectedProfile =
+		selectedStaff?.approved && selectedStaff.userId
+			? profileByUser.get(selectedStaff.userId)
+			: undefined;
 
 	async function save(form: FormData) {
 		"use server";
@@ -344,67 +264,21 @@ async function Permissions({
 					<Icon icon={Folder} className="size-4" />
 					Hồ sơ
 					<Badge variant={activeTab === "profiles" ? "soft-blue" : "secondary"}>
-						{PROFILES.length}
+						{profiles.length}
 					</Badge>
 				</Link>
 			</div>
 
 			{activeTab === "profiles" ? (
-				<div className="grid min-h-0 flex-1 lg:grid-cols-[280px_minmax(0,1fr)]">
-					<aside className="flex flex-col gap-2 border-r p-4">
-						<div className="flex items-center gap-2">
-							<div className="relative flex-1">
-								<Icon
-									icon={Search}
-									className="-translate-y-1/2 absolute top-1/2 left-2.5 size-3.5 text-muted-foreground"
-								/>
-								<Input placeholder="Tìm kiếm hồ sơ" className="pl-8" />
-							</div>
-							<Button size="icon" aria-label="Thêm hồ sơ" disabled>
-								<Icon icon={Add} />
-							</Button>
-						</div>
-						<ul className="flex flex-col gap-1 pt-1">
-							{PROFILES.map((prof) => (
-								<li key={prof.key}>
-									<Link
-										href={withParams(page, values, {
-											tab: "profiles",
-											profile: prof.key,
-										})}
-										className={cn(
-											"flex items-center justify-between rounded-md px-3 py-2.5 text-sm transition-colors hover:bg-accent/40",
-											prof.key === activeProfile.key &&
-												"bg-[#e8f3ff] font-semibold text-[#1677ff]",
-										)}
-									>
-										<span>{prof.label}</span>
-									</Link>
-								</li>
-							))}
-						</ul>
-					</aside>
-
-					<div className="flex flex-col gap-4 p-5">
-						<div className="flex items-start justify-between border-b pb-4">
-							<div className="space-y-1">
-								<h2 className="font-bold text-lg">{activeProfile.label}</h2>
-								<p className="max-w-3xl text-muted-foreground text-xs">
-									Hồ sơ giúp bạn định nghĩa một bộ quyền hạn để gán cho các nhân
-									viên có cùng vai trò. {activeProfile.description}
-								</p>
-							</div>
-							<Button variant="outline" size="sm" disabled>
-								Chỉnh sửa
-							</Button>
-						</div>
-
-						<PermissionsMatrix
-							profileKey={activeProfile.key}
-							role={activeProfile.role}
-						/>
-					</div>
-				</div>
+				<ProfileManager
+					shopId={shopId}
+					profiles={profiles.map((profile) => ({
+						id: profile.id,
+						name: profile.name,
+						matrix: profile.matrix,
+						memberCount: profile.memberUserIds.length,
+					}))}
+				/>
 			) : (
 				<div className="grid min-h-0 flex-1 lg:grid-cols-[300px_minmax(0,1fr)]">
 					<aside className="flex flex-col gap-2 border-r p-4">
@@ -553,9 +427,9 @@ async function Permissions({
 										name="employeeId"
 										value={selectedStaff.employeeId || "none"}
 									/>
-									<div className="grid items-end gap-4 md:grid-cols-[1fr_1fr_auto]">
+									<div className="grid items-end gap-4 md:grid-cols-[1fr_auto]">
 										<Field>
-											<FieldLabel>Hồ sơ</FieldLabel>
+											<FieldLabel>Vai trò</FieldLabel>
 											<Select name="role" defaultValue={selectedStaff.role}>
 												<SelectTrigger>
 													<SelectValue />
@@ -563,27 +437,10 @@ async function Permissions({
 												<SelectContent>
 													<SelectGroup>
 														<SelectItem value="MANAGER">
-															{selectedStaff.profile.role === "MANAGER"
-																? selectedStaff.profile.label
-																: "Sale Manager / Admin"}
+															Quản lý (CEO / Admin / Sale Manager)
 														</SelectItem>
 														<SelectItem value="TELESALE">Telesale</SelectItem>
 														<SelectItem value="VIEWER">Người xem</SelectItem>
-													</SelectGroup>
-												</SelectContent>
-											</Select>
-										</Field>
-										<Field>
-											<FieldLabel>Chi nhánh</FieldLabel>
-											<Select defaultValue="default">
-												<SelectTrigger>
-													<SelectValue />
-												</SelectTrigger>
-												<SelectContent>
-													<SelectGroup>
-														<SelectItem value="default">
-															Chi nhánh mặc định ({ctx.shop.name})
-														</SelectItem>
 													</SelectGroup>
 												</SelectContent>
 											</Select>
@@ -594,66 +451,39 @@ async function Permissions({
 									</div>
 								</form>
 
-								<PermissionsMatrix
-									profileKey={selectedStaff.profile.key}
-									role={selectedStaff.role}
-								/>
+								<div className="rounded-lg border p-4">
+									<MemberAccess
+										key={selectedStaff.key}
+										shopId={shopId}
+										userId={
+											selectedStaff.approved ? selectedStaff.userId : null
+										}
+										employeeId={selectedStaff.employeeId || null}
+										profiles={profiles.map((profile) => ({
+											id: profile.id,
+											name: profile.name,
+										}))}
+										profileId={selectedProfile?.id ?? null}
+										branches={accessBranches}
+									/>
+								</div>
+
+								<ProfilesNotEnforced />
+								{selectedProfile ? (
+									<PermissionGrid matrix={selectedProfile.matrix} />
+								) : (
+									<p className="text-muted-foreground text-xs">
+										{selectedStaff.approved
+											? "Nhân viên chưa được gán hồ sơ quyền."
+											: "Cần xét duyệt nhân viên vào CRM trước khi gán hồ sơ quyền."}
+									</p>
+								)}
 							</>
 						)}
 					</div>
 				</div>
 			)}
 		</SettingsFrame>
-	);
-}
-
-function PermissionsMatrix({
-	profileKey,
-	role,
-}: {
-	profileKey: string;
-	role: Role;
-}) {
-	return (
-		<div className="overflow-x-auto rounded-lg border">
-			<table className="w-full text-xs">
-				<thead className="bg-muted text-left text-muted-foreground uppercase">
-					<tr>
-						<th className="px-3.5 py-2.5 font-semibold">Bảng</th>
-						{ACTIONS.map((action) => (
-							<th
-								key={action}
-								className="px-3 py-2.5 text-center font-semibold"
-							>
-								{action}
-							</th>
-						))}
-					</tr>
-				</thead>
-				<tbody className="divide-y">
-					{TABLES.map((table) => (
-						<tr key={table.key} className="hover:bg-accent/20">
-							<td className="flex items-center gap-2.5 px-3.5 py-3 font-medium">
-								<span className="text-base">{table.icon}</span>
-								{table.label}
-							</td>
-							{ACTIONS.map((action) => (
-								<td key={action} className="px-3 py-3 text-center">
-									{allowed(profileKey, role, action, table.configurable) ? (
-										<Icon
-											icon={Checkmark}
-											className="inline size-4 text-emerald-600"
-										/>
-									) : (
-										<span className="text-muted-foreground">—</span>
-									)}
-								</td>
-							))}
-						</tr>
-					))}
-				</tbody>
-			</table>
-		</div>
 	);
 }
 

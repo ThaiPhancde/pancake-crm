@@ -1,4 +1,5 @@
-const DAY_MS = 86_400_000;
+const MINUTE_MS = 60_000;
+const DAY_MS = 1440 * MINUTE_MS;
 const CANCELLED_STATUSES: readonly number[] = [6, 7];
 const RETURNED_STATUSES: readonly number[] = [4, 5, 15];
 
@@ -54,6 +55,32 @@ export const PANCAKE = {
 		["1328205216", "966"],
 		["1328205226", "965"],
 	]),
+	reminderWindowMs: 60 * MINUTE_MS,
+	reminderBatch: 50,
+	automationStatus: {
+		ok: "đã chạy",
+		unsupported: "chưa hỗ trợ",
+		invalid: "lỗi cấu hình",
+	},
+	automationInternalActions: [
+		"notify_assignee",
+		"assign_to",
+	] as readonly string[],
+	defaultSound: "silent",
+	notificationSounds: [
+		"silent",
+		"default",
+		"bell",
+		"chime",
+	] as readonly string[],
+	savedFilterMax: 10,
+	exportMaxRows: 5000,
+	searchLimit: 5,
+	bulkMax: 200,
+	historyMaxPage: 100,
+	leadConvertedStatus: "converted",
+	ageBuckets: [18, 25, 35, 45, 55] as readonly number[],
+	purchaseBuckets: 5,
 	databaseNames: [
 		"CRM",
 		"crm",
@@ -70,6 +97,35 @@ export const ORDER_VIEWS = {
 	returns: { name: "Hoàn hàng", statuses: PANCAKE.returnedStatuses },
 	unassigned: { name: "Chưa phân công", statuses: [] as number[] },
 } as const;
+
+export const PERMISSION_ENTITIES = [
+	"lead",
+	"contact",
+	"order",
+	"product",
+	"appointment",
+	"ticket",
+	"task",
+	"report",
+	"settings",
+] as const;
+export const PERMISSION_ACTIONS = [
+	"configure",
+	"view",
+	"edit",
+	"delete",
+	"create",
+	"export",
+] as const;
+export const PERMISSION_DEFAULTS = [
+	{ name: "Quản trị viên", actions: PERMISSION_ACTIONS, skip: [] },
+	{
+		name: "Nhân viên bán hàng",
+		actions: ["view", "create", "edit"],
+		skip: ["product", "report", "settings"],
+	},
+	{ name: "Chỉ xem", actions: ["view"], skip: ["settings"] },
+] as const;
 
 export const RESOURCES = [
 	"employees",

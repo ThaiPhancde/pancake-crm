@@ -23,6 +23,8 @@ import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { FieldInput } from "@/components/shop/record-sheet";
 import { SettingsFrame } from "@/components/shop/settings-frame";
 
+const UNAVAILABLE = "Trình tạo trường tùy chỉnh chưa có backend";
+
 const ENTITY_BACK_PATH = {
 	lead: "/leads",
 	contact: "/contacts",
@@ -93,11 +95,11 @@ async function Fields({
 								<Icon icon={View} />
 							</Link>
 						</Button>
-						<Button variant="outline" disabled>
+						<Button variant="outline" disabled title={UNAVAILABLE}>
 							<Icon icon={Close} data-icon="inline-start" />
 							Bỏ thay đổi
 						</Button>
-						<Button variant="outline" disabled>
+						<Button variant="outline" disabled title={UNAVAILABLE}>
 							<Icon icon={Checkmark} data-icon="inline-start" />
 							Lưu
 						</Button>
@@ -111,7 +113,9 @@ async function Fields({
 										<button
 											type="button"
 											aria-label="Thêm nhóm trường"
-											className="flex size-6 items-center justify-center rounded-sm border bg-background text-muted-foreground hover:border-primary hover:text-primary"
+											disabled
+											title={UNAVAILABLE}
+											className="flex size-6 items-center justify-center rounded-sm border bg-background text-muted-foreground disabled:opacity-50"
 										>
 											<Icon icon={Add} className="size-3.5" />
 										</button>
@@ -123,16 +127,13 @@ async function Fields({
 										<h2 className="font-semibold text-[#1677ff] text-sm">
 											{section}
 										</h2>
-										<span className="cursor-pointer font-medium text-[#1677ff] text-xs hover:underline">
-											Chuyển đến trước ▾
-										</span>
 									</div>
 									<div className="grid gap-x-10 gap-y-5 md:grid-cols-2">
 										{items.map((field) => (
 											<div key={field.key} className="flex items-start gap-3">
 												<Icon
 													icon={Draggable}
-													className="mt-7 size-4 shrink-0 cursor-grab text-muted-foreground/70"
+													className="mt-7 size-4 shrink-0 text-muted-foreground/70"
 												/>
 												<Field className="flex-1">
 													<FieldLabel
@@ -165,13 +166,18 @@ async function Fields({
 						<span className="inline-block border-[#1677ff] border-b-2 pb-2.5 font-semibold text-[#1677ff] text-sm">
 							Thêm trường
 						</span>
+						<p className="pb-3 text-muted-foreground text-xs">
+							Trường tùy chỉnh chưa có backend. Bố cục bên trái chỉ để xem.
+						</p>
 					</div>
 					<ul className="divide-y">
 						{FIELD_TYPES.map((item) => (
 							<li key={item.type}>
 								<button
 									type="button"
-									className="flex w-full items-center gap-3.5 px-4 py-3 text-left text-sm transition-colors hover:bg-accent/40"
+									disabled
+									title={UNAVAILABLE}
+									className="flex w-full items-center gap-3.5 px-4 py-3 text-left text-sm disabled:opacity-60"
 								>
 									<span
 										className={`flex size-9 shrink-0 items-center justify-center rounded-lg font-semibold text-white text-xs shadow-2xs ${item.tone}`}

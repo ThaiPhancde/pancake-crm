@@ -1,20 +1,20 @@
-import Filter from "@carbon/icons-react/es/Filter";
-import { Button } from "@crm/ui/components/button";
-import { Icon } from "@crm/ui/components/icon";
 import { cn } from "@crm/ui/lib/utils";
 import { EmptyChart } from "./empty-state";
 import { RangeToggle, RefreshButton } from "./range-picker";
+import { ReportFilter, type UrlOption } from "./reports/url-select";
 
 export function ReportPage({
 	title,
 	children,
 	actions,
 	timeZone,
+	sellers,
 }: {
 	title: string;
 	timeZone: string;
 	children: React.ReactNode;
 	actions?: React.ReactNode;
+	sellers?: UrlOption[];
 }) {
 	return (
 		<div className="flex min-h-full flex-col gap-3">
@@ -27,10 +27,7 @@ export function ReportPage({
 						showDefault={false}
 						timeZone={timeZone}
 					/>
-					<Button variant="outline">
-						<Icon icon={Filter} data-icon="inline-start" />
-						Bộ lọc
-					</Button>
+					{sellers ? <ReportFilter sellers={sellers} /> : null}
 					{actions}
 				</div>
 			</div>

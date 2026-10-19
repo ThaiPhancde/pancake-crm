@@ -1,12 +1,9 @@
-import Filter from "@carbon/icons-react/es/Filter";
-import Search from "@carbon/icons-react/es/Search";
-import { Button } from "@crm/ui/components/button";
-import { Icon } from "@crm/ui/components/icon";
-import { Input } from "@crm/ui/components/input";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
-import { AutomationCenter } from "@/components/shop/automation-center";
-import { EmptyBox } from "@/components/shop/empty-state";
+import {
+	AutomationCenter,
+	AutomationList,
+} from "@/components/shop/automation-center";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { SettingsFrame } from "@/components/shop/settings-frame";
 
@@ -23,28 +20,19 @@ export default function AutomationPage({
 }
 
 async function Automation({ params }: { params: Promise<ShopRoute> }) {
-	await loadShop(params);
+	const ctx = await loadShop(params);
 	return (
 		<SettingsFrame current="Tự động hoá" className="gap-4 p-5">
-			<div className="flex flex-wrap items-center gap-2">
-				<div className="relative w-80">
-					<Icon
-						icon={Search}
-						className="-translate-y-1/2 absolute top-1/2 left-2.5 size-3.5 text-muted-foreground"
-					/>
-					<Input placeholder="Tìm theo tên, mô tả" className="pl-8" />
+			<div className="flex flex-wrap items-center justify-between gap-3">
+				<div>
+					<h2 className="font-semibold text-sm">Danh sách tự động hóa</h2>
+					<p className="text-muted-foreground text-xs">
+						Tự động thông báo, phân công khi bản ghi thay đổi
+					</p>
 				</div>
-				<Button variant="outline">Tất cả ▾</Button>
-				<Button variant="outline">
-					<Icon icon={Filter} data-icon="inline-start" />
-					Bộ lọc
-				</Button>
+				<AutomationCenter shopId={ctx.shopId} label="Mẫu đề xuất" />
 			</div>
-			<EmptyBox
-				title="Chưa có tự động hóa nào!"
-				description='Bấm "Thêm mới" để thêm tự động hóa'
-				action={<AutomationCenter label="Thêm mới" />}
-			/>
+			<AutomationList shopId={ctx.shopId} />
 		</SettingsFrame>
 	);
 }

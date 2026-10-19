@@ -1,5 +1,7 @@
 import {
 	approveEmployeeInput,
+	bulkUpdateInput,
+	businessReportInput,
 	createAppointmentInput,
 	createLeadInput,
 	createNoteInput,
@@ -7,12 +9,15 @@ import {
 	customerDetailInput,
 	listInput,
 	recordListInput,
+	recordRefInput,
 	reportInput,
 	roleInput,
 	updateAppointmentInput,
 	updateLeadInput,
 	updateTicketInput,
 } from "@crm/pancake/contracts";
+import { exportInput } from "@crm/pancake/exports";
+import { searchInput } from "@crm/pancake/insights";
 import {
 	createTaskInput,
 	taskListInput,
@@ -117,10 +122,10 @@ export class PancakeRouter {
 	) {
 		return this.pancake.products(ctx.user.id, input);
 	}
-	@Query({ input: listInput })
+	@Query({ input: businessReportInput })
 	report(
 		@Ctx() ctx: AuthedTrpcContext,
-		@Input() input: z.infer<typeof listInput>,
+		@Input() input: z.infer<typeof businessReportInput>,
 	) {
 		return this.pancake.report(ctx.user.id, input);
 	}
@@ -279,5 +284,54 @@ export class PancakeRouter {
 		@Input() input: z.infer<typeof reportInput>,
 	) {
 		return this.pancake.leadReport(ctx.user.id, input);
+	}
+	@Query({ input: recordRefInput })
+	leadDetail(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof recordRefInput>,
+	) {
+		return this.pancake.leadDetail(ctx.user.id, input);
+	}
+	@Mutation({ input: recordRefInput })
+	convertLead(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof recordRefInput>,
+	) {
+		return this.pancake.convertLead(ctx.user.id, input);
+	}
+	@Mutation({ input: bulkUpdateInput })
+	bulkUpdate(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof bulkUpdateInput>,
+	) {
+		return this.pancake.bulkUpdate(ctx.user.id, input);
+	}
+	@Query({ input: searchInput })
+	search(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof searchInput>,
+	) {
+		return this.pancake.search(ctx.user.id, input);
+	}
+	@Query({ input: exportInput })
+	exportCsv(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof exportInput>,
+	) {
+		return this.pancake.exportCsv(ctx.user.id, input);
+	}
+	@Query({ input: reportInput })
+	customerReport(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof reportInput>,
+	) {
+		return this.pancake.customerReport(ctx.user.id, input);
+	}
+	@Query({ input: reportInput })
+	taskReport(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof reportInput>,
+	) {
+		return this.pancake.taskReport(ctx.user.id, input);
 	}
 }

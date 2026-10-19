@@ -1,7 +1,4 @@
-import Download from "@carbon/icons-react/es/Download";
 import { Avatar, AvatarFallback, AvatarImage } from "@crm/ui/components/avatar";
-import { Button } from "@crm/ui/components/button";
-import { Icon } from "@crm/ui/components/icon";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
 import { formatAmount, formatAmounts } from "@/components/pancake/format";
@@ -9,9 +6,16 @@ import { EmptyChart } from "@/components/shop/empty-state";
 import { FilterChip } from "@/components/shop/filter-bar";
 import { ListTable } from "@/components/shop/list-table";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
-import { type SearchValues, shopFilters } from "@/components/shop/params";
+import { type SearchValues, shopFilters, text } from "@/components/shop/params";
 import { formatRange } from "@/components/shop/range";
 import { MetricRow, ReportCard, ReportPage } from "@/components/shop/report";
+import {
+	REPORT_GROUPINGS,
+	REPORTS,
+	type ReportGrouping,
+} from "@/components/shop/reports/config";
+import { ExportCsvButton } from "@/components/shop/reports/export-button";
+import { UrlSelect } from "@/components/shop/reports/url-select";
 import { shopProfile } from "@/components/shop/shop-profile";
 import { ShopTrendChart } from "@/components/shop/shop-trend-chart";
 import { initials } from "@/lib/initials";
@@ -36,8 +40,13 @@ async function Business({
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const filter = shopFilters(values, ctx.shopId, "week");
+	const grouping: ReportGrouping =
+		REPORT_GROUPINGS.find((item) => item.value === text(values, "grouping"))
+			?.value ?? "day";
+	const groupingLabel =
+		REPORT_GROUPINGS.find((item) => item.value === grouping)?.label ?? "";
 	const [report, sellers] = await Promise.all([
-		ctx.api.report.query(filter.input),
+		ctx.api.report.query({ ...filter.input, grouping }),
 		ctx.api.sellers.query({ shopId: ctx.shopId }),
 	]);
 	const shopCurrency = shopProfile(ctx.shopId).currency;
@@ -49,7 +58,11 @@ async function Business({
 	}));
 
 	return (
-		<ReportPage title="Báo cáo kinh doanh" timeZone={filter.timeZone}>
+		<ReportPage
+			title="Báo cáo kinh doanh"
+			timeZone={filter.timeZone}
+			sellers={staff}
+		>
 			<ReportCard title="Tổng quan">
 				<MetricRow
 					metrics={[
@@ -73,17 +86,21 @@ async function Business({
 				/>
 			</ReportCard>
 			<ReportCard
-				title="Biểu đồ doanh thu theo ngày"
+				title={`Biểu đồ doanh thu theo ${groupingLabel.toLowerCase()}`}
 				action={
-					<Button variant="outline" size="sm">
-						Ngày ▾
-					</Button>
+					<UrlSelect
+						param="grouping"
+						label="Nhóm theo"
+						value={grouping}
+						defaultValue="day"
+						options={REPORT_GROUPINGS}
+					/>
 				}
 			>
-				{report.dailySeries.length > 0 ? (
+				{report.series.length > 0 ? (
 					<ShopTrendChart
-						height={220}
-						data={report.dailySeries}
+						height={REPORTS.trendHeight}
+						data={report.series}
 						xKey="date"
 						currency={currency}
 						config={{
@@ -110,10 +127,18 @@ async function Business({
 				title="Thống kê đơn hàng theo nhân viên"
 				action={
 					<div className="flex items-center gap-2">
-						<Button variant="outline" size="sm" disabled>
-							<Icon icon={Download} data-icon="inline-start" />
-							Xuất excel
-						</Button>
+						<ExportCsvButton
+							label="Xuất excel"
+							source={{
+								kind: "business",
+								filters: {
+									shopId: ctx.shopId,
+									from: filter.input.from,
+									to: filter.input.to,
+									sellerId: filter.input.sellerId,
+								},
+							}}
+						/>
 						<FilterChip
 							label="Nhân viên"
 							param="sellerId"

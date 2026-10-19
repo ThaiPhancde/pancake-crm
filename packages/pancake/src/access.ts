@@ -118,3 +118,20 @@ export async function assertWorkspaceAdmin(
 	if (!member || !["owner", "admin"].includes(member.role))
 		throw new PancakeAccessError();
 }
+
+export async function assertShopReader(
+	db: Db,
+	userId: string,
+	shopId: string,
+): Promise<ShopGrant[]> {
+	const grants = await shopGrants(db, userId);
+	if (!grants.some((grant) => grant.shopId === shopId))
+		throw new PancakeAccessError();
+	return grants;
+}
+
+export function canManage(grants: ShopGrant[], shopId: string): boolean {
+	return grants.some(
+		(grant) => grant.shopId === shopId && grant.role === "MANAGER",
+	);
+}

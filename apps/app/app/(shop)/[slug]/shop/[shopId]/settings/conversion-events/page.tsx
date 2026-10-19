@@ -8,6 +8,8 @@ import { EmptyBox } from "@/components/shop/empty-state";
 import { ListTable } from "@/components/shop/list-table";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { type SearchValues, text, withParams } from "@/components/shop/params";
+import { UNSUPPORTED } from "@/components/shop/settings/config";
+import { Unsupported } from "@/components/shop/settings/unsupported";
 import { SettingsFrame, SettingsTabs } from "@/components/shop/settings-frame";
 
 const TABS = [
@@ -73,11 +75,17 @@ async function ConversionEvents({
 							</p>
 						</div>
 						<div className="flex gap-2">
-							<Button variant="outline">Danh sách dataset tin nhắn</Button>
-							<Button>
-								<Icon icon={Add} data-icon="inline-start" />
-								Thêm sự kiện
-							</Button>
+							<Unsupported reason={UNSUPPORTED.external}>
+								<Button variant="outline" disabled>
+									Danh sách dataset tin nhắn
+								</Button>
+							</Unsupported>
+							<Unsupported reason={UNSUPPORTED.external}>
+								<Button disabled>
+									<Icon icon={Add} data-icon="inline-start" />
+									Thêm sự kiện
+								</Button>
+							</Unsupported>
 						</div>
 					</div>
 					<ListTable
@@ -95,13 +103,15 @@ async function ConversionEvents({
 						rows={EVENTS.map((event) => ({
 							key: event.name,
 							cells: [
-								<Switch key="on" defaultChecked />,
+								<Unsupported key="on" reason={UNSUPPORTED.external}>
+									<Switch checked={false} disabled aria-label="Bật/Tắt" />
+								</Unsupported>,
 								event.name,
 								<span key="rule">
 									{event.entity} với <b>Trạng thái</b> Là <b>{event.value}</b>
 								</span>,
 								<span key="updated" className="text-muted-foreground">
-									{ctx.session.user.name} · mặc định
+									Chưa kết nối
 								</span>,
 							],
 						}))}
@@ -118,16 +128,22 @@ async function ConversionEvents({
 								<b>quảng cáo Lead Form</b>
 							</p>
 						</div>
-						<Button variant="outline">Danh sách dataset CRM</Button>
+						<Unsupported reason={UNSUPPORTED.external}>
+							<Button variant="outline" disabled>
+								Danh sách dataset CRM
+							</Button>
+						</Unsupported>
 					</div>
 					<EmptyBox
 						title={`Chưa có sự kiện ${channel} Lead Form`}
 						description={`Bấm "Thêm sự kiện" để thêm sự kiện ${channel} Lead Form`}
 						action={
-							<Button>
-								<Icon icon={Add} data-icon="inline-start" />
-								Thêm sự kiện
-							</Button>
+							<Unsupported reason={UNSUPPORTED.external}>
+								<Button disabled>
+									<Icon icon={Add} data-icon="inline-start" />
+									Thêm sự kiện
+								</Button>
+							</Unsupported>
 						}
 					/>
 				</section>

@@ -1,7 +1,6 @@
 import ChevronLeft from "@carbon/icons-react/es/ChevronLeft";
 import ChevronRight from "@carbon/icons-react/es/ChevronRight";
 import { Button } from "@crm/ui/components/button";
-import { Checkbox } from "@crm/ui/components/checkbox";
 import { Icon } from "@crm/ui/components/icon";
 import {
 	Table,
@@ -15,6 +14,13 @@ import { cn } from "@crm/ui/lib/utils";
 import Link from "next/link";
 import { ClickableRow } from "./clickable-row";
 import { EmptyRows } from "./empty-state";
+import {
+	BulkBar,
+	type BulkConfig,
+	RowCheckbox,
+	SelectAllCheckbox,
+	SelectionProvider,
+} from "./lists/selection";
 import { ShopPageFooter } from "./page";
 
 export type ListColumn = { key: string; label: string; className?: string };
@@ -23,78 +29,89 @@ export function ListTable({
 	columns,
 	rows,
 	empty = "Trống",
-	selectable = true,
+	bulk,
 }: {
 	columns: ListColumn[];
 	rows: { key: string; cells: React.ReactNode[]; href?: string }[];
 	empty?: string;
 	selectable?: boolean;
+	bulk?: BulkConfig;
 }) {
+	const selectable = Boolean(bulk);
 	return (
-		<div className="min-h-0 flex-1 overflow-auto rounded-md">
-			<Table className="text-xs">
-				<TableHeader className="sticky top-0 z-10 bg-muted [&_tr]:border-0">
-					<TableRow className="hover:bg-muted">
-						{selectable ? (
-							<TableHead className="w-10 pl-4">
-								<Checkbox aria-label="Chọn tất cả" />
-							</TableHead>
-						) : null}
-						{columns.map((column) => (
-							<TableHead
-								key={column.key}
-								className={cn(
-									"font-semibold text-foreground",
-									column.className,
-								)}
-							>
-								{column.label}
-							</TableHead>
-						))}
-					</TableRow>
-				</TableHeader>
-				<TableBody>
-					{rows.map((row) => (
-						<ClickableRow
-							key={row.key}
-							href={row.href}
-							className="hover:bg-accent/40"
-						>
+		<SelectionProvider
+			key={rows.map((row) => row.key).join()}
+			ids={rows.map((row) => row.key)}
+		>
+			{bulk ? <BulkBar config={bulk} /> : null}
+			<div className="min-h-0 flex-1 overflow-auto rounded-md">
+				<Table className="text-xs">
+					<TableHeader className="sticky top-0 z-10 bg-muted [&_tr]:border-0">
+						<TableRow className="hover:bg-muted">
 							{selectable ? (
-								<TableCell className="pl-4">
-									<Checkbox aria-label="Chọn dòng" />
-								</TableCell>
+								<TableHead className="w-10 pl-4">
+									<SelectAllCheckbox />
+								</TableHead>
 							) : null}
-							{row.cells.map((cell, index) => (
-								<TableCell
-									key={columns[index]?.key ?? index}
-									className={cn("max-w-64 truncate", columns[index]?.className)}
-								>
-									{index === 0 && row.href ? (
-										<Link
-											href={row.href}
-											scroll={false}
-											className="font-medium text-foreground hover:text-primary"
-										>
-											{cell}
-										</Link>
-									) : (
-										cell
+							{columns.map((column) => (
+								<TableHead
+									key={column.key}
+									className={cn(
+										"font-semibold text-foreground",
+										column.className,
 									)}
-								</TableCell>
+								>
+									{column.label}
+								</TableHead>
 							))}
-						</ClickableRow>
-					))}
-					{rows.length === 0 ? (
-						<TableRow className="hover:bg-transparent">
-							<TableCell colSpan={columns.length + (selectable ? 1 : 0)}>
-								<EmptyRows label={empty} />
-							</TableCell>
 						</TableRow>
-					) : null}
-				</TableBody>
-			</Table>
-		</div>
+					</TableHeader>
+					<TableBody>
+						{rows.map((row) => (
+							<ClickableRow
+								key={row.key}
+								href={row.href}
+								className="hover:bg-accent/40"
+							>
+								{selectable ? (
+									<TableCell className="pl-4">
+										<RowCheckbox id={row.key} />
+									</TableCell>
+								) : null}
+								{row.cells.map((cell, index) => (
+									<TableCell
+										key={columns[index]?.key ?? index}
+										className={cn(
+											"max-w-64 truncate",
+											columns[index]?.className,
+										)}
+									>
+										{index === 0 && row.href ? (
+											<Link
+												href={row.href}
+												scroll={false}
+												className="font-medium text-foreground hover:text-primary"
+											>
+												{cell}
+											</Link>
+										) : (
+											cell
+										)}
+									</TableCell>
+								))}
+							</ClickableRow>
+						))}
+						{rows.length === 0 ? (
+							<TableRow className="hover:bg-transparent">
+								<TableCell colSpan={columns.length + (selectable ? 1 : 0)}>
+									<EmptyRows label={empty} />
+								</TableCell>
+							</TableRow>
+						) : null}
+					</TableBody>
+				</Table>
+			</div>
+		</SelectionProvider>
 	);
 }
 

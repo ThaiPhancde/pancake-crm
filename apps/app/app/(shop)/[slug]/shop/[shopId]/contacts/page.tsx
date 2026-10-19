@@ -19,12 +19,14 @@ import {
 	FilterButton,
 	FilterChip,
 	MoreMenu,
+	QuickViewChip,
 	RangeChip,
 	SearchBox,
-	SortButton,
 	StatsToggle,
 } from "@/components/shop/filter-bar";
 import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
+import { LIST_CONFIG } from "@/components/shop/lists/config";
+import { loadSavedFilters } from "@/components/shop/lists/saved-filters-server";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { ShopPage, ShopPageBody, ShopPageHeader } from "@/components/shop/page";
 import {
@@ -93,10 +95,11 @@ async function Contacts({
 		}
 	}
 
-	const [customers, sellers, activeDetail] = await Promise.all([
+	const [customers, sellers, activeDetail, saved] = await Promise.all([
 		ctx.api.customers.query(filter.input),
 		sellersQuery,
 		detailQuery,
+		loadSavedFilters(ctx.shopId, "contacts"),
 	]);
 	const detailStaff = staffOf(sellers);
 	const staff = detailStaff.users;
@@ -118,7 +121,11 @@ async function Contacts({
 								Giao diện
 							</Link>
 						</Button>
-						<CreateRecordButton collection="contact" users={staff} />
+						<CreateRecordButton
+							collection="contact"
+							users={staff}
+							disabledReason={LIST_CONFIG.oneWayReason}
+						/>
 					</>
 				}
 			/>
@@ -130,22 +137,37 @@ async function Contacts({
 								placeholder="Tên, điện thoại, email"
 								className="w-56"
 							/>
-							<SortButton
-								fields={columns.map((c) => ({ value: c.key, label: c.label }))}
-							/>
 							<FilterButton
-								fields={collection.fields
-									.filter((f) => !f.hidden)
-									.map((f) => ({
-										value: f.key,
-										label: f.label,
-									}))}
+								saved={saved}
+								fields={[
+									{
+										param: "sellerId",
+										label: "Phân công",
+										options: [
+											{
+												value: PANCAKE.unassignedValue,
+												label: "Chưa phân công",
+											},
+											...staff,
+										],
+									},
+								]}
 							/>
 							<StatsToggle defaultOn />
-							<MoreMenu />
+							<MoreMenu
+								exportRequest={{
+									kind: "contacts",
+									shopId: ctx.shopId,
+									filters: filter.input,
+								}}
+							/>
 						</>
 					}
 				>
+					<QuickViewChip
+						options={[{ value: "all", label: "Tất cả liên hệ" }]}
+						saved={saved}
+					/>
 					<FilterChip
 						label="Phân công"
 						param="sellerId"

@@ -5,6 +5,8 @@ import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
 import { EmptyBox } from "@/components/shop/empty-state";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
+import { UNSUPPORTED } from "@/components/shop/settings/config";
+import { Unsupported } from "@/components/shop/settings/unsupported";
 import { SettingsFrame } from "@/components/shop/settings-frame";
 
 export default function AudiencesPage({
@@ -30,13 +32,15 @@ async function Audiences({ params }: { params: Promise<ShopRoute> }) {
 				</p>
 			</div>
 			<EmptyBox
-				title="Danh sách tệp khách hàng"
-				description="Tạo tệp khách hàng, đồng bộ Custom Audiences Facebook, Tiktok"
+				title="Chưa có tệp khách hàng"
+				description={UNSUPPORTED.external}
 				action={
-					<Button disabled>
-						<Icon icon={Add} data-icon="inline-start" />
-						Thêm mới
-					</Button>
+					<Unsupported reason={UNSUPPORTED.external}>
+						<Button disabled>
+							<Icon icon={Add} data-icon="inline-start" />
+							Thêm mới
+						</Button>
+					</Unsupported>
 				}
 			/>
 		</SettingsFrame>

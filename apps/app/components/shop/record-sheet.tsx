@@ -41,6 +41,7 @@ import {
 	type FieldOption,
 	fieldSections,
 } from "./collections";
+import { LIST_CONFIG } from "./lists/config";
 
 export type RelationOptions = Partial<
 	Record<NonNullable<FieldDef["relation"]>, FieldOption[]>
@@ -333,6 +334,7 @@ export function CreateRecordButton({
 	defaults,
 	size = "lg",
 	menu,
+	disabledReason,
 }: {
 	collection: CollectionKey;
 	label?: string;
@@ -341,13 +343,15 @@ export function CreateRecordButton({
 	defaults?: Record<string, string>;
 	size?: "lg" | "md";
 	menu?: { label: string; onSelect?: () => void }[];
+	disabledReason?: string;
 }) {
 	const [open, setOpen] = useState(false);
 	return (
 		<>
-			<div className="inline-flex">
+			<div className="inline-flex" title={disabledReason}>
 				<Button
 					onClick={() => setOpen(true)}
+					disabled={Boolean(disabledReason)}
 					className={cn(menu && "rounded-r-none")}
 				>
 					<Icon icon={Add} data-icon="inline-start" />
@@ -366,9 +370,17 @@ export function CreateRecordButton({
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
 							{menu.map((item) => (
-								<DropdownMenuItem key={item.label} onSelect={item.onSelect}>
-									{item.label}
-								</DropdownMenuItem>
+								<div
+									key={item.label}
+									title={item.onSelect ? undefined : LIST_CONFIG.oneWayReason}
+								>
+									<DropdownMenuItem
+										disabled={!item.onSelect}
+										onSelect={item.onSelect}
+									>
+										{item.label}
+									</DropdownMenuItem>
+								</div>
 							))}
 						</DropdownMenuContent>
 					</DropdownMenu>
