@@ -3,19 +3,34 @@ import { WORKSPACE_ID } from "@crm/db/workspace";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getSession } from "@/lib/session";
+import { getServerTrpcClient } from "@/lib/trpc/server";
 import { workspaceUrl } from "@/lib/workspace-url";
+
+async function resolveWorkspaceSlug(): Promise<string | null> {
+	try {
+		const workspace = await db.organization.findUnique({
+			where: { id: WORKSPACE_ID },
+			select: { slug: true },
+		});
+		if (workspace?.slug) return workspace.slug;
+	} catch {
+		// Fall through to remote API workspace lookup
+	}
+
+	try {
+		const workspace = await getServerTrpcClient().workspace.get.query();
+		return workspace.slug;
+	} catch {
+		return null;
+	}
+}
 
 // Skip the marketing page. Signed-in visitors go straight to their workspace;
 // sending them to /sign-in would loop, as that page sends signed-in users back here.
 async function Entry(): Promise<null> {
 	if (!(await getSession())) redirect("/sign-in");
-	const workspace = await db.organization.findUnique({
-		where: { id: WORKSPACE_ID },
-		select: { slug: true },
-	});
-	redirect(
-		workspace ? workspaceUrl(workspace.slug, "/pancake") : "/onboarding",
-	);
+	const slug = await resolveWorkspaceSlug();
+	redirect(slug ? workspaceUrl(slug, "/pancake") : "/onboarding");
 	return null;
 }
 
