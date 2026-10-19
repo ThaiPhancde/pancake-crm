@@ -14,6 +14,7 @@ export const PANCAKE = {
 	recentWindowMs: 172_800_000,
 	recentPageBudget: 20,
 	transactionMs: 600_000,
+	syncLeaseMs: 900_000,
 	webhookMaxBytes: 1_048_576,
 	webhookMaxAttempts: 8,
 	webhookBatch: 25,

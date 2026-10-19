@@ -319113,6 +319113,7 @@ var PANCAKE = {
   recentWindowMs: 172800000,
   recentPageBudget: 20,
   transactionMs: 600000,
+  syncLeaseMs: 900000,
   webhookMaxBytes: 1048576,
   webhookMaxAttempts: 8,
   webhookBatch: 25,

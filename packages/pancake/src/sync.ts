@@ -1,5 +1,4 @@
 import type { Db, PancakeShopModel } from "@crm/db";
-import { Pool } from "pg";
 import {
 	PancakeApiError,
 	PancakeClient,
@@ -196,29 +195,29 @@ export async function syncShop(
 	assertCrmDatabase(url);
 	const apiKey = process.env[shop.apiKeyEnv];
 	if (!apiKey) throw new PancakeApiError("API_KEY_REQUIRED");
-	const pool = new Pool({
-		connectionString: url,
-		max: 1,
-		connectionTimeoutMillis: PANCAKE.timeoutMs,
-	});
-	const connection = await pool.connect();
 	const lock = `pancake-sync:${shop.id}`;
-	let acquired = false;
 	let runId: string | undefined;
 	let pages = 0;
 	let records = 0;
 	try {
-		const result = await connection.query<{ locked: boolean }>(
-			"SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked",
-			[lock],
-		);
-		acquired = result.rows[0]?.locked ?? false;
-		if (!acquired) return { locked: true, pages, records };
 		const fresh = await db.pancakeShop.findUniqueOrThrow({
 			where: { id: shop.id },
 		});
 		assertLiveAllowed(fresh);
-		const run = await db.pancakeSyncRun.create({ data: { shopId: shop.id } });
+		const run = await db.$transaction(async (tx) => {
+			await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))`;
+			const active = await tx.pancakeSyncRun.findFirst({
+				where: {
+					shopId: shop.id,
+					status: "running",
+					startedAt: { gt: new Date(Date.now() - PANCAKE.syncLeaseMs) },
+				},
+				select: { id: true },
+			});
+			if (active) return null;
+			return tx.pancakeSyncRun.create({ data: { shopId: shop.id } });
+		});
+		if (!run) return { locked: true, pages, records };
 		runId = run.id;
 		const reader = readerOverride ?? new PancakeClient(shop.id, apiKey);
 		let allComplete = true;
@@ -342,14 +341,6 @@ export async function syncShop(
 			errorCode,
 			error instanceof PancakeApiError ? error.retryAfterMs : 0,
 		);
-	} finally {
-		if (acquired)
-			await connection.query(
-				"SELECT pg_advisory_unlock(hashtextextended($1, 0))",
-				[lock],
-			);
-		connection.release();
-		await pool.end();
 	}
 }
 
