@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { orderScope, PancakeAccessError } from "../src/access";
-import { assertCrmDatabase } from "../src/config";
+import { canWrite, orderScope, PancakeAccessError } from "../src/access";
+import { assertCrmDatabase, PANCAKE, shopTimezone } from "../src/config";
 import {
 	employeeWire,
 	isNewer,
@@ -8,6 +8,7 @@ import {
 	roleInput,
 	sourceDate,
 } from "../src/contracts";
+import { fillDays, splitList, zonedDay, zonedMidnight } from "../src/queries";
 import { assertLiveAllowed } from "../src/sync";
 import { webhookTokenValid } from "../src/webhook";
 import { sampleOrder } from "./fixtures";
@@ -136,5 +137,52 @@ describe("data safety", () => {
 		expect(webhookTokenValid(token, "wrong")).toBe(false);
 		expect(webhookTokenValid(undefined, token)).toBe(false);
 		expect(webhookTokenValid("short", "short")).toBe(false);
+	});
+});
+
+describe("reporting rules", () => {
+	test("viewers cannot write and other roles can", () => {
+		expect(
+			canWrite([{ shopId: "1", role: "VIEWER", employeeId: null }], "1"),
+		).toBe(false);
+		expect(
+			canWrite([{ shopId: "1", role: "TELESALE", employeeId: "e" }], "1"),
+		).toBe(true);
+		expect(
+			canWrite([{ shopId: "1", role: "MANAGER", employeeId: null }], "2"),
+		).toBe(false);
+	});
+	test("booked sales exclude cancelled, deleted and returned orders", () => {
+		expect([...PANCAKE.bookedExcludedStatuses].sort((a, b) => a - b)).toEqual([
+			4, 5, 6, 7, 15,
+		]);
+		expect(PANCAKE.receivedStatuses).toEqual([3, 16]);
+	});
+	test("multi-value filters split commas and drop the any value", () =>
+		expect(splitList("a, b,,all,a,none")).toEqual(["a", "b", "none"]));
+	test("days are bucketed in the shop time zone", () => {
+		expect(shopTimezone("1635200759")).toBe("Asia/Dubai");
+		expect(shopTimezone("unknown")).toBe(PANCAKE.timezone);
+		expect(zonedDay(new Date("2026-10-18T21:30:00Z"), "Asia/Dubai")).toBe(
+			"2026-10-19",
+		);
+		expect(zonedMidnight("2026-10-19", "Asia/Riyadh").toISOString()).toBe(
+			"2026-10-18T21:00:00.000Z",
+		);
+	});
+	test("every day in the range gets a bucket, ending today", () => {
+		const days = fillDays(
+			new Map([["2026-10-17", { date: "2026-10-17", orders: 2 }]]),
+			{ from: "2026-10-16T00:00:00+04:00", to: "2026-10-30T00:00:00+04:00" },
+			new Date("2026-10-19T10:00:00Z"),
+			"Asia/Dubai",
+			(date) => ({ date, orders: 0 }),
+		);
+		expect(days.map((day) => [day.date, day.orders])).toEqual([
+			["2026-10-16", 0],
+			["2026-10-17", 2],
+			["2026-10-18", 0],
+			["2026-10-19", 0],
+		]);
 	});
 });

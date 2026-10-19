@@ -9,8 +9,10 @@ export function ReportPage({
 	title,
 	children,
 	actions,
+	timeZone,
 }: {
 	title: string;
+	timeZone: string;
 	children: React.ReactNode;
 	actions?: React.ReactNode;
 }) {
@@ -20,7 +22,11 @@ export function ReportPage({
 				<h1 className="text-lg font-semibold tracking-tight">{title}</h1>
 				<div className="flex flex-wrap items-center gap-2">
 					<RefreshButton />
-					<RangeToggle defaultRange="week" showDefault={false} />
+					<RangeToggle
+						defaultRange="week"
+						showDefault={false}
+						timeZone={timeZone}
+					/>
 					<Button variant="outline">
 						<Icon icon={Filter} data-icon="inline-start" />
 						Bộ lọc

@@ -1,5 +1,7 @@
+import { PANCAKE, shopTimezone } from "@crm/pancake/config";
 import { listInput } from "@crm/pancake/contracts";
 import { z } from "zod";
+import { zonedMidnight } from "@/components/shop/range";
 
 export type SearchValues = { [key: string]: string | string[] | undefined };
 
@@ -27,8 +29,16 @@ export function parseFilters(values: SearchValues) {
 	const datesValid =
 		(!from || z.iso.date().safeParse(from).success) &&
 		(!to || z.iso.date().safeParse(to).success);
-	const end = datesValid && to ? new Date(`${to}T00:00:00+07:00`) : undefined;
-	if (end) end.setTime(end.getTime() + 86_400_000);
+	const timeZone = shopTimezone(text("shopId"));
+	const end =
+		datesValid && to
+			? zonedMidnight(
+					new Date(Date.parse(`${to}T00:00:00Z`) + PANCAKE.dayMs)
+						.toISOString()
+						.slice(0, 10),
+					timeZone,
+				)
+			: undefined;
 	const safeView = z
 		.enum(["all", "pending", "shipping", "returns", "unassigned"])
 		.catch("all")
@@ -51,7 +61,7 @@ export function parseFilters(values: SearchValues) {
 				: undefined,
 		from:
 			datesValid && from
-				? new Date(`${from}T00:00:00+07:00`).toISOString()
+				? zonedMidnight(from, timeZone).toISOString()
 				: undefined,
 		to: end?.toISOString(),
 		page: text("page") ? Number(text("page")) : 1,

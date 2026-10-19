@@ -79,6 +79,22 @@ export function orderScope(
 	};
 }
 
+export function canWrite(grants: ShopGrant[], shopId: string): boolean {
+	return grants.some(
+		(grant) => grant.shopId === shopId && grant.role !== "VIEWER",
+	);
+}
+
+export async function assertShopWriter(
+	db: Db,
+	userId: string,
+	shopId: string,
+): Promise<ShopGrant[]> {
+	const grants = await shopGrants(db, userId);
+	if (!canWrite(grants, shopId)) throw new PancakeAccessError();
+	return grants;
+}
+
 export async function assertShopManager(
 	db: Db,
 	userId: string,

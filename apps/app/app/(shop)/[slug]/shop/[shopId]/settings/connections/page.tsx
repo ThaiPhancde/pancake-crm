@@ -9,6 +9,7 @@ import { EmptyBox } from "@/components/shop/empty-state";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { type SearchValues, text, withParams } from "@/components/shop/params";
 import { SettingsFrame, SettingsTabs } from "@/components/shop/settings-frame";
+import { SyncToggle } from "@/components/shop/sync-toggle";
 
 const TABS = [
 	{ value: "pancake", label: "Pancake" },
@@ -73,12 +74,15 @@ async function Connections({
 				) : null}
 				{tab === "pos" ? (
 					<>
-						<div>
-							<h2 className="font-semibold text-sm">Pancake POS</h2>
-							<p className="text-muted-foreground text-xs">
-								Khách hàng, đơn hàng, sản phẩm và nhân viên đồng bộ từ shop POS
-								này.
-							</p>
+						<div className="flex flex-wrap items-start justify-between gap-3">
+							<div>
+								<h2 className="font-semibold text-sm">Pancake POS</h2>
+								<p className="text-muted-foreground text-xs">
+									Khách hàng, đơn hàng, sản phẩm và nhân viên đồng bộ từ shop
+									POS này.
+								</p>
+							</div>
+							<SyncToggle shopId={shop.id} enabled={shop.enabled} />
 						</div>
 						<div className="grid gap-4 rounded-lg border p-4 md:grid-cols-2">
 							<div className="flex flex-col gap-2 text-xs">
@@ -95,6 +99,7 @@ async function Connections({
 											: "Chưa duyệt dữ liệu thật"}
 									</Badge>
 								</div>
+								<p>Đồng bộ shop: {shop.enabled ? "Đang bật" : "Đã tạm dừng"}</p>
 								<p>
 									Mã shop: <span className="font-mono">{shop.id}</span>
 								</p>

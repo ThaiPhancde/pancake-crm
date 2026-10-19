@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
+import { LEAD_STATUSES } from "@/components/shop/collections";
 import { ListTable } from "@/components/shop/list-table";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import {
@@ -10,11 +11,13 @@ import {
 } from "@/components/shop/params";
 import {
 	Breakdown,
+	HorizontalBars,
 	MetricRow,
 	ReportCard,
 	ReportEmpty,
 	ReportPage,
 } from "@/components/shop/report";
+import { countBars } from "@/components/shop/report-bars";
 import { SettingsTabs } from "@/components/shop/settings-frame";
 
 export default function CustomersReportPage(props: {
@@ -47,14 +50,29 @@ async function Customers({
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const filter = shopFilters(values, ctx.shopId, "week");
 	const tab = text(values, "tab") === "leads" ? "leads" : "contacts";
-	const customers = await ctx.api.customers.query({
-		...filter.input,
-		pageSize: 1,
-	});
+	const [customers, leads] = await Promise.all([
+		ctx.api.customers.query({
+			...filter.input,
+			pageSize: 1,
+		}),
+		tab === "leads"
+			? ctx.api.leadReport.query({
+					shopId: ctx.shopId,
+					from: filter.input.from,
+					to: filter.input.to,
+				})
+			: undefined,
+	]);
+	const leadCount = (status: string) =>
+		leads?.byStatus.find((row) => row.status === status)?.count ?? 0;
+	const statusItems = (leads?.byStatus ?? []).map((row) => ({
+		value: row.status,
+		count: row.count,
+	}));
 	const page = `${ctx.base}/reports/customers`;
 
 	return (
-		<ReportPage title="Báo cáo khách hàng">
+		<ReportPage title="Báo cáo khách hàng" timeZone={filter.timeZone}>
 			<div className="rounded-lg bg-card px-5 py-2">
 				<SettingsTabs
 					tabs={[
@@ -74,10 +92,13 @@ async function Customers({
 					metrics={
 						tab === "leads"
 							? [
-									{ label: "Số tiềm năng", value: 0 },
-									{ label: "SL đang chăm sóc", value: 0 },
-									{ label: "SL đã chuyển đổi", value: 0 },
-									{ label: "SL không tiềm năng", value: 0 },
+									{ label: "Số tiềm năng", value: leads?.total ?? 0 },
+									{ label: "SL đang chăm sóc", value: leadCount("nurturing") },
+									{ label: "SL đã chuyển đổi", value: leadCount("converted") },
+									{
+										label: "SL không tiềm năng",
+										value: leadCount("disqualified"),
+									},
 								]
 							: [
 									{ label: "Số liên hệ", value: customers.total },
@@ -119,10 +140,28 @@ async function Customers({
 			{tab === "leads" ? (
 				<div className="grid gap-3 lg:grid-cols-2">
 					<ReportCard title="Phễu chuyển đổi tiềm năng">
-						<ReportEmpty />
+						{leads?.total ? (
+							<HorizontalBars
+								items={LEAD_STATUSES.filter(
+									(status) => status.value !== "disqualified",
+								).map((status) => ({
+									label: status.label,
+									value: leadCount(status.value),
+									display: leadCount(status.value).toLocaleString("vi-VN"),
+								}))}
+							/>
+						) : (
+							<ReportEmpty />
+						)}
 					</ReportCard>
 					<ReportCard title="Thống kê theo trạng thái tiềm năng">
-						<ReportEmpty />
+						<HorizontalBars
+							items={countBars(
+								statusItems,
+								LEAD_STATUSES,
+								"Chưa có trạng thái",
+							)}
+						/>
 					</ReportCard>
 				</div>
 			) : (

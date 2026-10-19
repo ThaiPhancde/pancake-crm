@@ -189,6 +189,19 @@ export const PRODUCT_TYPES: FieldOption[] = [
 	{ value: "bundle", label: "Gói dịch vụ", color: "purple" },
 ];
 
+const MINUTE_MS = 60_000;
+
+export const RECORD_DEFAULTS = {
+	minuteMs: MINUTE_MS,
+	dayMs: 24 * 60 * MINUTE_MS,
+	appointmentStepMinutes: 5,
+	appointmentMinutes: 30,
+	appointmentStatus: "scheduled",
+	ticketDueDays: 3,
+	ticketPriority: "low",
+	ticketStatus: "new",
+};
+
 const INFO_LEAD = "Thông tin tiềm năng";
 const INFO_CONTACT = "Thông tin liên hệ";
 const ADDRESS = "Thông tin địa chỉ";

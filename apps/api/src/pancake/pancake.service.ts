@@ -8,9 +8,14 @@ import type {
 	createTicketInput,
 	listInput,
 	recordListInput,
+	reportInput,
 	roleInput,
+	updateAppointmentInput,
+	updateLeadInput,
+	updateTicketInput,
 } from "@crm/pancake/contracts";
 import {
+	appointmentReport,
 	approveAllEmployees,
 	approveEmployee,
 	connectionStatus,
@@ -21,6 +26,7 @@ import {
 	customerDetail,
 	customerPurchases,
 	dashboardReport,
+	leadReport,
 	listAppointments,
 	listCustomers,
 	listLeads,
@@ -31,8 +37,13 @@ import {
 	operationsOverview,
 	orderDetail,
 	pauseShop,
+	resumeShop,
 	sellerOptions,
 	setMembership,
+	ticketReport,
+	updateAppointment,
+	updateLead,
+	updateTicket,
 } from "@crm/pancake/queries";
 import {
 	createTask,
@@ -146,6 +157,30 @@ export class PancakeService {
 	}
 	createNote(userId: string, input: z.infer<typeof createNoteInput>) {
 		return this.authorize(() => createNote(this.db, userId, input));
+	}
+	resume(userId: string, shopId: string) {
+		return this.authorize(() => resumeShop(this.db, userId, shopId));
+	}
+	updateLead(userId: string, input: z.infer<typeof updateLeadInput>) {
+		return this.authorize(() => updateLead(this.db, userId, input));
+	}
+	updateAppointment(
+		userId: string,
+		input: z.infer<typeof updateAppointmentInput>,
+	) {
+		return this.authorize(() => updateAppointment(this.db, userId, input));
+	}
+	updateTicket(userId: string, input: z.infer<typeof updateTicketInput>) {
+		return this.authorize(() => updateTicket(this.db, userId, input));
+	}
+	appointmentReport(userId: string, input: z.infer<typeof reportInput>) {
+		return this.authorize(() => appointmentReport(this.db, userId, input));
+	}
+	ticketReport(userId: string, input: z.infer<typeof reportInput>) {
+		return this.authorize(() => ticketReport(this.db, userId, input));
+	}
+	leadReport(userId: string, input: z.infer<typeof reportInput>) {
+		return this.authorize(() => leadReport(this.db, userId, input));
 	}
 	private async authorize<T>(action: () => Promise<T>): Promise<T> {
 		try {

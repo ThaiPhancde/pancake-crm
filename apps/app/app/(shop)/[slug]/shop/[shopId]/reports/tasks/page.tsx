@@ -41,7 +41,7 @@ async function Tasks({
 	const onTime = all.total ? Math.round((100 * done.total) / all.total) : 0;
 
 	return (
-		<ReportPage title="Báo cáo nhiệm vụ">
+		<ReportPage title="Báo cáo nhiệm vụ" timeZone={filter.timeZone}>
 			<ReportCard title="Tổng quan">
 				<MetricRow
 					metrics={[

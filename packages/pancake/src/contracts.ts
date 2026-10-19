@@ -270,7 +270,7 @@ export const listInput = z
 		shopId: z.string().min(1).optional(),
 		q: z.string().max(120).default(""),
 		status: z.number().int().optional(),
-		sellerId: z.string().max(120).optional(),
+		sellerId: z.string().max(2000).optional(),
 		from: z.iso.datetime({ offset: true }).optional(),
 		to: z.iso.datetime({ offset: true }).optional(),
 		page: z.number().int().min(1).max(100_000).default(1),
@@ -298,18 +298,77 @@ export const customerDetailInput = z.object({
 	shopId: z.string().min(1),
 	customerId: z.string().min(1),
 });
-export const recordListInput = z.object({
-	shopId: z.string().min(1),
-	q: z.string().max(120).default(""),
-	status: z.string().max(80).optional(),
-	assigneeId: z.string().max(120).optional(),
-	customerId: z.string().max(120).optional(),
-	from: z.iso.datetime({ offset: true }).optional(),
-	to: z.iso.datetime({ offset: true }).optional(),
-	page: z.number().int().min(1).max(100_000).default(1),
-	pageSize: z.number().int().min(1).max(PANCAKE.maxListSize).default(25),
-});
+const multiValue = z.string().max(2000).optional();
+const assignableText = (max: number) =>
+	z
+		.string()
+		.trim()
+		.max(max)
+		.nullable()
+		.optional()
+		.refine(
+			(v) => v !== PANCAKE.unassignedValue && v !== PANCAKE.anyValue,
+			"Reserved value",
+		);
+export const recordListInput = z
+	.object({
+		shopId: z.string().min(1),
+		q: z.string().max(120).default(""),
+		status: multiValue,
+		assigneeId: multiValue,
+		creatorId: multiValue,
+		source: multiValue,
+		priority: multiValue,
+		category: multiValue,
+		quick: z.string().max(40).optional(),
+		customerId: z.string().max(120).optional(),
+		from: z.iso.datetime({ offset: true }).optional(),
+		to: z.iso.datetime({ offset: true }).optional(),
+		page: z.number().int().min(1).max(100_000).default(1),
+		pageSize: z.number().int().min(1).max(PANCAKE.maxListSize).default(25),
+	})
+	.refine((v) => !v.from || !v.to || v.from <= v.to, "Invalid date range");
 export type RecordListInput = z.infer<typeof recordListInput>;
+export const reportInput = z
+	.object({
+		shopId: z.string().min(1),
+		from: z.iso.datetime({ offset: true }).optional(),
+		to: z.iso.datetime({ offset: true }).optional(),
+	})
+	.refine((v) => !v.from || !v.to || v.from <= v.to, "Invalid date range");
+export type ReportInput = z.infer<typeof reportInput>;
+export const updateLeadInput = z.object({
+	id: z.string().min(1),
+	shopId: z.string().min(1),
+	status: z.string().trim().min(1).max(80).optional(),
+	assigneeId: assignableText(120),
+});
+export const updateAppointmentInput = z
+	.object({
+		id: z.string().min(1),
+		shopId: z.string().min(1),
+		title: z.string().trim().min(1).max(160).optional(),
+		note: z.string().trim().max(2000).optional(),
+		status: z.string().trim().min(1).max(80).optional(),
+		startAt: z.iso.datetime({ offset: true }).optional(),
+		endAt: z.iso.datetime({ offset: true }).nullable().optional(),
+		assigneeId: assignableText(120),
+	})
+	.refine(
+		(v) =>
+			!v.endAt ||
+			(v.startAt !== undefined && Date.parse(v.startAt) <= Date.parse(v.endAt)),
+		"Invalid date range",
+	);
+export const updateTicketInput = z.object({
+	id: z.string().min(1),
+	shopId: z.string().min(1),
+	status: z.string().trim().min(1).max(80).optional(),
+	priority: z.string().trim().min(1).max(80).optional(),
+	category: assignableText(120),
+	assigneeId: assignableText(120),
+	dueAt: z.iso.datetime({ offset: true }).nullable().optional(),
+});
 export const createLeadInput = z.object({
 	shopId: z.string().min(1),
 	name: z.string().trim().min(1).max(160),

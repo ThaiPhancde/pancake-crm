@@ -1,5 +1,6 @@
 import Phone from "@carbon/icons-react/es/Phone";
 import SettingsAdjust from "@carbon/icons-react/es/SettingsAdjust";
+import { PANCAKE } from "@crm/pancake/config";
 import { Avatar, AvatarFallback, AvatarImage } from "@crm/ui/components/avatar";
 import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
@@ -7,12 +8,8 @@ import { Icon } from "@crm/ui/components/icon";
 import Link from "next/link";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
-import { formatAmount } from "@/components/pancake/format";
-import {
-	COLLECTIONS,
-	CONTACT_STATUSES,
-	SOURCE_OPTIONS,
-} from "@/components/shop/collections";
+import { formatAmounts } from "@/components/pancake/format";
+import { COLLECTIONS } from "@/components/shop/collections";
 import {
 	CustomerDetailDrawer,
 	CustomerDetailFullView,
@@ -22,7 +19,6 @@ import {
 	FilterButton,
 	FilterChip,
 	MoreMenu,
-	QuickViewChip,
 	RangeChip,
 	SearchBox,
 	SortButton,
@@ -64,17 +60,34 @@ async function Contacts({
 	const fullView = text(values, "full") === "1";
 	const statsShown = text(values, "stats") !== "0";
 	const page = `${ctx.base}/contacts`;
+	const sellersQuery = ctx.api.sellers.query({ shopId: ctx.shopId });
+	const detailQuery = selectedCustomerId
+		? ctx.api.customerDetail
+				.query({ shopId: ctx.shopId, customerId: selectedCustomerId })
+				.catch(() => null)
+		: Promise.resolve(null);
+	const staffOf = (sellers: Awaited<typeof sellersQuery>) => ({
+		users: sellers.map((seller) => ({
+			value: seller.employeeId,
+			label: seller.name,
+		})),
+		currentEmployeeId:
+			sellers.find(
+				(seller) =>
+					seller.email &&
+					seller.email.toLowerCase() === ctx.session.user.email.toLowerCase(),
+			)?.employeeId ?? null,
+	});
 
 	if (selectedCustomerId && fullView) {
-		const detail = await ctx.api.customerDetail
-			.query({ shopId: ctx.shopId, customerId: selectedCustomerId })
-			.catch(() => null);
+		const [detail, sellers] = await Promise.all([detailQuery, sellersQuery]);
 		if (detail) {
 			return (
 				<CustomerDetailFullView
 					detail={detail}
 					backHref={withParams(page, values, { customerId: "", full: "" })}
 					base={ctx.base}
+					staff={staffOf(sellers)}
 				/>
 			);
 		}
@@ -82,17 +95,11 @@ async function Contacts({
 
 	const [customers, sellers, activeDetail] = await Promise.all([
 		ctx.api.customers.query(filter.input),
-		ctx.api.sellers.query({ shopId: ctx.shopId }),
-		selectedCustomerId
-			? ctx.api.customerDetail
-					.query({ shopId: ctx.shopId, customerId: selectedCustomerId })
-					.catch(() => null)
-			: Promise.resolve(null),
+		sellersQuery,
+		detailQuery,
 	]);
-	const staff = sellers.map((seller) => ({
-		value: seller.employeeId,
-		label: seller.name,
-	}));
+	const detailStaff = staffOf(sellers);
+	const staff = detailStaff.users;
 	const collection = COLLECTIONS.contact;
 	const columns = collection.fields
 		.filter((field) => field.list)
@@ -134,45 +141,22 @@ async function Contacts({
 										label: f.label,
 									}))}
 							/>
-							<StatsToggle />
+							<StatsToggle defaultOn />
 							<MoreMenu />
 						</>
 					}
 				>
-					<QuickViewChip
-						options={[
-							{ value: "all", label: "Mặc định" },
-							{ value: "new", label: "Liên hệ mới" },
-							{ value: "repeat", label: "Khách mua lại" },
-						]}
-						savedFilters="⚙ Bộ lọc đã lưu (0/10)"
-					/>
 					<FilterChip
 						label="Phân công"
 						param="sellerId"
-						searchable
-						options={[{ value: "all", label: "Tất cả nhân viên" }, ...staff]}
-					/>
-					<FilterChip
-						label="Trạng thái"
-						param="contactStatus"
 						multiple
-						options={CONTACT_STATUSES}
+						searchable
+						options={[
+							{ value: PANCAKE.unassignedValue, label: "Chưa phân công" },
+							...staff,
+						]}
 					/>
 					<RangeChip />
-					<FilterChip
-						label="Người tạo"
-						param="creator"
-						multiple
-						searchable
-						options={staff}
-					/>
-					<FilterChip
-						label="Nguồn khách hàng"
-						param="source"
-						multiple
-						options={SOURCE_OPTIONS}
-					/>
 				</FilterBar>
 
 				{statsShown ? (
@@ -195,7 +179,7 @@ async function Contacts({
 							<span className="font-semibold text-xs">Tổng số tiền đã chi</span>
 							<div className="flex items-baseline justify-between">
 								<span className="font-bold text-2xl tabular-nums">
-									{formatAmount(
+									{formatAmounts(
 										customers.summary.totalSpent,
 										customers.summary.currency,
 									)}
@@ -205,7 +189,8 @@ async function Contacts({
 								</Badge>
 							</div>
 							<span className="text-muted-foreground text-[11px]">
-								Tính trên các đơn đã nhận / thu tiền
+								Đơn {customers.summary.spendWindowDays} ngày gần nhất, trừ đơn
+								hủy / hoàn
 							</span>
 						</div>
 						<div className="flex flex-col justify-between gap-2 rounded-lg border bg-card p-4">
@@ -307,6 +292,7 @@ async function Contacts({
 							full: "1",
 						})}
 						base={ctx.base}
+						staff={detailStaff}
 					/>
 				) : null}
 			</ShopPageBody>

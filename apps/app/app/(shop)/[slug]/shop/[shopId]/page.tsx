@@ -1,13 +1,23 @@
 import Maximize from "@carbon/icons-react/es/Maximize";
+import { PANCAKE } from "@crm/pancake/config";
 import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
 import { DonutStat } from "@crm/ui/components/dashboard-chart";
 import { Icon } from "@crm/ui/components/icon";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@crm/ui/components/tooltip";
 import Link from "next/link";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
-import { formatAmount, formatDate } from "@/components/pancake/format";
-import { CalendarGrid, todayIso } from "@/components/shop/calendar-week";
+import {
+	formatAmount,
+	formatAmounts,
+	formatDate,
+} from "@/components/pancake/format";
+import { CalendarGrid } from "@/components/shop/calendar-week";
 import { EmptyChart, EmptyRows } from "@/components/shop/empty-state";
 import { HomeViewSelect } from "@/components/shop/home-controls";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
@@ -17,7 +27,11 @@ import {
 	text,
 	withParams,
 } from "@/components/shop/params";
-import { formatRange } from "@/components/shop/range";
+import {
+	formatRange,
+	rangeBounds,
+	zonedDateTime,
+} from "@/components/shop/range";
 import { RangeToggle, RefreshButton } from "@/components/shop/range-picker";
 import { HorizontalBars, ReportCard } from "@/components/shop/report";
 import { shopProfile } from "@/components/shop/shop-profile";
@@ -38,10 +52,12 @@ function Tile({
 	label,
 	value,
 	emoji,
+	sub,
 }: {
 	label: string;
 	value: React.ReactNode;
 	emoji: string;
+	sub?: string;
 }) {
 	return (
 		<div className="flex items-center gap-3">
@@ -51,6 +67,11 @@ function Tile({
 			<div className="flex flex-col">
 				<span className="text-muted-foreground text-xs">{label}</span>
 				<span className="font-semibold text-base tabular-nums">{value}</span>
+				{sub ? (
+					<span className="text-muted-foreground text-xs tabular-nums">
+						{sub}
+					</span>
+				) : null}
 			</div>
 		</div>
 	);
@@ -104,7 +125,12 @@ async function Home({
 					sellerId: personalEmployee?.employeeId ?? "__personal_none__",
 				}
 			: filter.input;
-	const [overview, report, customers, tasks, leads, tickets] =
+	const personalAssignee =
+		view === "personal"
+			? (personalEmployee?.employeeId ?? "__personal_none__")
+			: undefined;
+	const week = shopFilters({ range: "week" }, ctx.shopId).input;
+	const [overview, report, customers, tasks, leads, tickets, appointments] =
 		await Promise.all([
 			ctx.api.overview.query(scopedInput),
 			ctx.api.report.query(scopedInput),
@@ -116,27 +142,41 @@ async function Home({
 			}),
 			ctx.api.leads.query({
 				shopId: ctx.shopId,
-				assigneeId:
-					view === "personal"
-						? (personalEmployee?.employeeId ?? "__personal_none__")
-						: undefined,
+				assigneeId: personalAssignee,
 				pageSize: 1,
 			}),
 			ctx.api.tickets.query({
 				shopId: ctx.shopId,
-				assigneeId:
-					view === "personal"
-						? (personalEmployee?.employeeId ?? "__personal_none__")
-						: undefined,
+				assigneeId: personalAssignee,
 				pageSize: 1,
 			}),
+			view === "personal"
+				? ctx.api.appointments.query({
+						shopId: ctx.shopId,
+						assigneeId: personalAssignee,
+						from: week.from,
+						to: week.to,
+						pageSize: PANCAKE.maxListSize,
+					})
+				: null,
 		]);
-	const currency =
-		report.revenue[0]?.currency ?? shopProfile(ctx.shopId).currency;
-	const revenue = report.revenue.reduce(
-		(sum, row) => sum + Number(row.amount),
-		0,
-	);
+	const today = rangeBounds("today", new Date(), filter.timeZone).from;
+	const events = (appointments?.rows ?? []).map((item) => {
+		const start = zonedDateTime(new Date(item.startAt), filter.timeZone);
+		return {
+			id: item.id,
+			title: item.title,
+			date: start.date,
+			start: start.time,
+			end: item.endAt
+				? zonedDateTime(new Date(item.endAt), filter.timeZone).time
+				: start.time,
+		};
+	});
+	const shopCurrency = shopProfile(ctx.shopId).currency;
+	const currency = report.seriesCurrency;
+	const revenueText = formatAmounts(report.revenue, shopCurrency);
+	const receivedText = `Đã thu: ${formatAmounts(report.receivedRevenue, currency)}`;
 	const rate = report.orders
 		? Math.round((100 * report.delivered) / report.orders)
 		: 0;
@@ -163,7 +203,11 @@ async function Home({
 				<div className="flex flex-wrap items-center gap-2">
 					<RefreshButton />
 					<HomeViewSelect value={view} />
-					<RangeToggle quick={["today", "week", "month"]} defaultRange="30d" />
+					<RangeToggle
+						quick={["today", "week", "month"]}
+						defaultRange="30d"
+						timeZone={filter.timeZone}
+					/>
 				</div>
 			</div>
 
@@ -176,7 +220,8 @@ async function Home({
 								<div className="grid gap-5 sm:grid-cols-2">
 									<Tile
 										label="Doanh thu"
-										value={formatAmount(String(revenue), currency)}
+										value={revenueText}
+										sub={receivedText}
 										emoji="💰"
 									/>
 									<Tile
@@ -199,8 +244,13 @@ async function Home({
 						</div>
 						<ReportCard title="Báo cáo doanh thu">
 							<div className="flex items-baseline justify-between">
-								<div className="font-semibold text-lg tabular-nums">
-									{formatAmount(String(revenue), currency)}
+								<div className="flex flex-col">
+									<span className="font-semibold text-lg tabular-nums">
+										{revenueText}
+									</span>
+									<span className="text-muted-foreground text-xs tabular-nums">
+										{receivedText}
+									</span>
 								</div>
 								<span className="text-muted-foreground text-xs">
 									{report.delivered} đơn thành công / {report.orders} tổng đơn
@@ -217,6 +267,10 @@ async function Home({
 											label: `Doanh thu (${currency})`,
 											color: "var(--chart-1)",
 										},
+										received: {
+											label: `Đã thu (${currency})`,
+											color: "var(--chart-3)",
+										},
 									}}
 								/>
 							) : (
@@ -231,9 +285,21 @@ async function Home({
 						<ReportCard title="Mục tiêu doanh thu">
 							<div className="rounded-md border-primary border-l-2 bg-muted px-4 py-6 text-muted-foreground text-xs">
 								Chưa đặt mục tiêu cho shop này.
-								<Button variant="link" size="sm" className="ml-1 px-0">
-									Thiết lập mục tiêu
-								</Button>
+								<Tooltip>
+									<TooltipTrigger asChild>
+										<span className="ml-1 inline-flex">
+											<Button
+												variant="link"
+												size="sm"
+												className="px-0"
+												disabled
+											>
+												Thiết lập mục tiêu
+											</Button>
+										</span>
+									</TooltipTrigger>
+									<TooltipContent>Sắp ra mắt</TooltipContent>
+								</Tooltip>
 							</div>
 						</ReportCard>
 					</div>
@@ -321,7 +387,8 @@ async function Home({
 									{ label: "Liên hệ mới", value: customers.total },
 									{
 										label: "Doanh thu cá nhân",
-										value: formatAmount(String(revenue), currency),
+										value: revenueText,
+										sub: receivedText,
 									},
 									{ label: "Tỷ lệ chuyển đổi", value: `${rate}%` },
 								].map((item) => (
@@ -335,6 +402,11 @@ async function Home({
 										<span className="font-semibold text-xl tabular-nums">
 											{item.value}
 										</span>
+										{"sub" in item ? (
+											<span className="text-muted-foreground text-xs tabular-nums">
+												{item.sub}
+											</span>
+										) : null}
 									</div>
 								))}
 							</div>
@@ -404,7 +476,7 @@ async function Home({
 						title="Lịch hẹn"
 						action={
 							<div className="flex items-center gap-2 text-muted-foreground text-xs">
-								{todayIso().split("-").reverse().join("/")}
+								{today.split("-").reverse().join("/")}
 								<Button
 									asChild
 									variant="ghost"
@@ -420,9 +492,10 @@ async function Home({
 						className="min-h-[520px]"
 					>
 						<CalendarGrid
-							date={todayIso()}
+							date={today}
 							mode="week"
-							today={todayIso()}
+							today={today}
+							events={events}
 							compact
 						/>
 					</ReportCard>

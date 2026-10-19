@@ -4,7 +4,7 @@ import { Button } from "@crm/ui/components/button";
 import { Icon } from "@crm/ui/components/icon";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
-import { formatAmount } from "@/components/pancake/format";
+import { formatAmount, formatAmounts } from "@/components/pancake/format";
 import { EmptyChart } from "@/components/shop/empty-state";
 import { FilterChip } from "@/components/shop/filter-bar";
 import { ListTable } from "@/components/shop/list-table";
@@ -40,28 +40,32 @@ async function Business({
 		ctx.api.report.query(filter.input),
 		ctx.api.sellers.query({ shopId: ctx.shopId }),
 	]);
-	const currency =
-		report.revenue[0]?.currency ?? shopProfile(ctx.shopId).currency;
-	const revenue = report.revenue.reduce(
-		(sum, row) => sum + Number(row.amount),
-		0,
-	);
+	const shopCurrency = shopProfile(ctx.shopId).currency;
+	const currency = report.seriesCurrency;
 	const closed = report.orders - report.cancelled;
-	const average = report.delivered ? revenue / report.delivered : 0;
-	const money = (value: number) => formatAmount(String(value), currency);
 	const staff = sellers.map((seller) => ({
 		value: seller.employeeId,
 		label: seller.name,
 	}));
 
 	return (
-		<ReportPage title="Báo cáo kinh doanh">
+		<ReportPage title="Báo cáo kinh doanh" timeZone={filter.timeZone}>
 			<ReportCard title="Tổng quan">
 				<MetricRow
 					metrics={[
-						{ label: "Doanh thu", value: money(revenue) },
+						{
+							label: "Doanh thu",
+							value: formatAmounts(report.revenue, shopCurrency),
+						},
+						{
+							label: "Đã thu",
+							value: formatAmounts(report.receivedRevenue, currency),
+						},
 						{ label: "Số đơn chốt", value: closed },
-						{ label: "Giá trị trung bình đơn", value: money(average) },
+						{
+							label: "Giá trị trung bình đơn",
+							value: formatAmounts(report.averageOrderValue, shopCurrency),
+						},
 						{ label: "Đơn thành công", value: report.delivered },
 						{ label: "Đơn hoàn", value: report.returned },
 						{ label: "Đơn đã hủy", value: report.cancelled },
@@ -86,6 +90,10 @@ async function Business({
 							revenue: {
 								label: `Doanh thu (${currency})`,
 								color: "var(--chart-1)",
+							},
+							received: {
+								label: `Đã thu (${currency})`,
+								color: "var(--chart-3)",
 							},
 						}}
 					/>
@@ -153,8 +161,9 @@ async function Business({
 					}))}
 				/>
 				<p className="text-muted-foreground text-xs">
-					Theo ngày tạo đơn và trạng thái hiện tại. Doanh thu lấy từ đơn đã nhận
-					/ thu tiền, chưa trừ phí, thuế và tiền hoàn một phần.
+					Theo ngày tạo đơn và trạng thái hiện tại. Doanh thu tính trên mọi đơn
+					trừ đơn hủy, xóa và hoàn; đã thu chỉ gồm đơn đã nhận / thu tiền. Chưa
+					trừ phí và thuế.
 				</p>
 			</ReportCard>
 		</ReportPage>

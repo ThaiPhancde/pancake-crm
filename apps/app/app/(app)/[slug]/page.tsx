@@ -1,4 +1,5 @@
 import ShoppingCart from "@carbon/icons-react/es/ShoppingCart";
+import { shopTimezone } from "@crm/pancake/config";
 import { Avatar, AvatarFallback, AvatarImage } from "@crm/ui/components/avatar";
 import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
@@ -14,7 +15,11 @@ import {
 	PageShellHeading,
 	PageShellLoading,
 } from "@/components/page-shell";
-import { formatAmount, formatDate } from "@/components/pancake/format";
+import {
+	formatAmount,
+	formatAmounts,
+	formatDate,
+} from "@/components/pancake/format";
 import { EmptyChart } from "@/components/shop/empty-state";
 import {
 	orderStatusName,
@@ -63,6 +68,7 @@ export default function OverviewPage({
 						<RangeToggle
 							quick={["today", "week", "month", "30d"]}
 							defaultRange="30d"
+							timeZone={shopTimezone()}
 						/>
 					</Suspense>
 					<Button asChild size="sm">
@@ -107,9 +113,10 @@ async function MultiShopDashboard({
 
 	const perShopReports = await Promise.all(
 		shops.map(async (shop) => {
+			const shopInput = shopFilters(values, shop.id, "30d").input;
 			const [shopOverview, shopReport] = await Promise.all([
-				api.overview.query({ ...globalInput, shopId: shop.id }),
-				api.report.query({ ...globalInput, shopId: shop.id }),
+				api.overview.query(shopInput),
+				api.report.query(shopInput),
 			]);
 			return {
 				shop,
@@ -133,7 +140,41 @@ async function MultiShopDashboard({
 
 	return (
 		<div className="flex flex-col gap-5">
-			<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+			<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+				<div className="flex flex-col justify-between gap-2 rounded-lg border bg-card p-4 sm:col-span-2">
+					<span className="text-muted-foreground text-xs">
+						Doanh thu theo tiền tệ
+					</span>
+					{report.revenue.length === 0 ? (
+						<span className="font-semibold text-2xl tabular-nums">0</span>
+					) : (
+						<div className="flex flex-col gap-1">
+							{report.revenue.map((row) => (
+								<div
+									key={row.currency}
+									className="flex flex-wrap items-baseline gap-x-3"
+								>
+									<span className="font-semibold text-2xl tabular-nums">
+										{formatAmount(row.amount, row.currency)}
+									</span>
+									<span className="text-muted-foreground text-[11px] tabular-nums">
+										Đã thu:{" "}
+										{formatAmount(
+											report.receivedRevenue.find(
+												(item) => item.currency === row.currency,
+											)?.amount ?? "0",
+											row.currency,
+										)}
+									</span>
+								</div>
+							))}
+						</div>
+					)}
+					<span className="text-muted-foreground text-[11px]">
+						Không cộng gộp các loại tiền. Khoảng ngày theo giờ Việt Nam (GMT
+						+7:00); thẻ từng shop dùng giờ địa phương của shop.
+					</span>
+				</div>
 				{[
 					{
 						label: "Tổng đơn các shop",
@@ -195,10 +236,6 @@ async function MultiShopDashboard({
 					{perShopReports.map(
 						({ shop, overview: sOverview, report: sReport }) => {
 							const profile = shopProfile(shop.id);
-							const shopRevenue = sReport.revenue.reduce(
-								(sum, r) => sum + Number(r.amount),
-								0,
-							);
 							const rate = sReport.orders
 								? ((100 * sReport.delivered) / sReport.orders).toFixed(1)
 								: "0.0";
@@ -241,10 +278,14 @@ async function MultiShopDashboard({
 
 										<div className="mt-4 rounded-lg bg-muted/50 p-3.5">
 											<div className="text-muted-foreground text-xs">
-												Doanh thu đơn đã nhận ({shop.currency})
+												Doanh thu ({shop.currency})
 											</div>
 											<div className="mt-1 font-bold text-xl tabular-nums">
-												{formatAmount(String(shopRevenue), shop.currency)}
+												{formatAmounts(sReport.revenue, shop.currency)}
+											</div>
+											<div className="mt-1 text-muted-foreground text-[11px] tabular-nums">
+												Đã thu:{" "}
+												{formatAmounts(sReport.receivedRevenue, shop.currency)}
 											</div>
 											<div className="mt-1 text-muted-foreground text-[11px]">
 												Tỷ lệ giao thành công: <strong>{rate}%</strong> (

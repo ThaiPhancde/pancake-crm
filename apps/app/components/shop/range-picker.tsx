@@ -48,10 +48,12 @@ export function RangeToggle({
 	quick = QUICK,
 	defaultRange = "30d",
 	showDefault = true,
+	timeZone,
 }: {
 	quick?: RangeKey[];
 	defaultRange?: RangeKey;
 	showDefault?: boolean;
+	timeZone: string;
 }) {
 	const search = useSearchParams();
 	const write = useRangeWriter();
@@ -82,13 +84,14 @@ export function RangeToggle({
 					{RANGES[key]}
 				</button>
 			))}
-			<RangePopover />
+			<RangePopover timeZone={timeZone} />
 		</div>
 	);
 }
 
-export function RangePopover() {
+export function RangePopover({ timeZone }: { timeZone: string }) {
 	const search = useSearchParams();
+	const last30 = rangeBounds("30d", new Date(), timeZone);
 	const write = useRangeWriter();
 	const [from, setFrom] = useState(search.get("from") ?? "");
 	const [to, setTo] = useState(search.get("to") ?? "");
@@ -149,7 +152,7 @@ export function RangePopover() {
 							Áp dụng
 						</Button>
 						<p className="text-muted-foreground text-xs">
-							30 ngày qua: {rangeBounds("30d").from} → {rangeBounds("30d").to}
+							30 ngày qua: {last30.from} → {last30.to}
 						</p>
 					</form>
 				</div>

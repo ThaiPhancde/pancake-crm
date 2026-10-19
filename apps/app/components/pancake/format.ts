@@ -1,7 +1,29 @@
+const DIGITS: Intl.NumberFormatOptions = {
+	minimumFractionDigits: 0,
+	maximumFractionDigits: 1,
+	signDisplay: "negative",
+};
+
 export function formatAmount(value: string, currency: string) {
-	return new Intl.NumberFormat("vi-VN", { style: "currency", currency }).format(
-		Number(value),
-	);
+	const amount = Number(value) || 0;
+	try {
+		return new Intl.NumberFormat("vi-VN", {
+			style: "currency",
+			currency,
+			...DIGITS,
+		}).format(amount);
+	} catch {
+		return `${new Intl.NumberFormat("vi-VN", DIGITS).format(amount)} ${currency}`.trim();
+	}
+}
+
+export function formatAmounts(
+	rows: readonly { amount: string; currency: string }[],
+	fallbackCurrency: string,
+) {
+	return rows.length
+		? rows.map((row) => formatAmount(row.amount, row.currency)).join(" · ")
+		: formatAmount("0", fallbackCurrency);
 }
 
 export function formatDate(value: string | null) {

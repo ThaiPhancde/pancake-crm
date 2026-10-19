@@ -1,11 +1,11 @@
 import ChevronLeft from "@carbon/icons-react/es/ChevronLeft";
 import ChevronRight from "@carbon/icons-react/es/ChevronRight";
+import { PANCAKE } from "@crm/pancake/config";
 import { Button } from "@crm/ui/components/button";
 import { Icon } from "@crm/ui/components/icon";
 import { cn } from "@crm/ui/lib/utils";
 import Link from "next/link";
 
-const DAY_MS = 86_400_000;
 const HOURS = Array.from({ length: 16 }, (_, index) => index + 7);
 const WEEKDAYS = [
 	"Thứ Hai",
@@ -35,7 +35,7 @@ function iso(day: Date): string {
 }
 
 function addDays(day: Date, count: number): Date {
-	return new Date(day.getTime() + count * DAY_MS);
+	return new Date(day.getTime() + count * PANCAKE.dayMs);
 }
 
 function mondayOf(day: Date): Date {
@@ -262,6 +262,67 @@ function MonthGrid({
 	);
 }
 
-export function todayIso(): string {
-	return new Date(Date.now() + 7 * 3_600_000).toISOString().slice(0, 10);
+function zoned(instant: Date, timeZone: string) {
+	const parts = new Intl.DateTimeFormat("en-CA", {
+		timeZone,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		hourCycle: "h23",
+	}).formatToParts(instant);
+	const part = (type: Intl.DateTimeFormatPartTypes) =>
+		parts.find((item) => item.type === type)?.value ?? "00";
+	return {
+		date: `${part("year")}-${part("month")}-${part("day")}`,
+		time: `${part("hour")}:${part("minute")}`,
+	};
+}
+
+function zonedMidnight(day: Date, timeZone: string): Date {
+	const local = zoned(day, timeZone);
+	const shown = Date.parse(`${local.date}T${local.time}:00Z`);
+	return new Date(day.getTime() - (shown - day.getTime()));
+}
+
+export function todayIso(timeZone: string): string {
+	return zoned(new Date(), timeZone).date;
+}
+
+export function visibleRange(
+	date: string,
+	mode: "day" | "week" | "month",
+	timeZone: string,
+) {
+	const day = parse(date);
+	const first =
+		mode === "day"
+			? day
+			: mode === "week"
+				? mondayOf(day)
+				: mondayOf(
+						new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), 1)),
+					);
+	const length = mode === "day" ? 1 : mode === "week" ? 7 : 42;
+	return {
+		from: zonedMidnight(first, timeZone).toISOString(),
+		to: zonedMidnight(addDays(first, length), timeZone).toISOString(),
+	};
+}
+
+export function toCalendarEvents(
+	rows: { id: string; title: string; startAt: string; endAt: string | null }[],
+	timeZone: string,
+): CalendarEvent[] {
+	return rows.map((row) => {
+		const start = zoned(new Date(row.startAt), timeZone);
+		return {
+			id: row.id,
+			title: row.title,
+			date: start.date,
+			start: start.time,
+			end: row.endAt ? zoned(new Date(row.endAt), timeZone).time : start.time,
+		};
+	});
 }

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { pancakeUrl, parseFilters } from "./filter-state";
 import { formatAmount } from "./format";
 
+const plain = (text: string) => text.replace(/\s/g, " ");
+
 describe("Pancake navigation", () => {
 	test("invalid shared URLs recover without crashing the page", () => {
 		for (const values of [
@@ -30,7 +32,23 @@ describe("Pancake navigation", () => {
 		expect(url).toContain("shopId=1");
 		expect(url).not.toContain("page=");
 	});
-	test("Kuwait prices keep all three currency decimal places", () => {
-		expect(formatAmount("1.234", "KWD")).toContain("1,234");
+	test("shop date filters cover an inclusive day in the shop time zone", () => {
+		const filter = parseFilters({
+			shopId: "1635200759",
+			from: "2026-10-15",
+			to: "2026-10-15",
+		});
+		expect(filter.input.from).toBe("2026-10-14T20:00:00.000Z");
+		expect(filter.input.to).toBe("2026-10-15T20:00:00.000Z");
+	});
+	test("money shows at most one fraction digit and only when non-zero", () => {
+		expect(plain(formatAmount("1.234", "KWD"))).toBe("1,2 KWD");
+		expect(plain(formatAmount("4162753.61", "SAR"))).toBe("4.162.753,6 SAR");
+		expect(plain(formatAmount("120", "SAR"))).toBe("120 SAR");
+		expect(plain(formatAmount("120.04", "SAR"))).toBe("120 SAR");
+		expect(plain(formatAmount("0", "SAR"))).toBe("0 SAR");
+	});
+	test("an invalid currency code falls back instead of throwing", () => {
+		expect(plain(formatAmount("12.5", "not-a-code"))).toBe("12,5 not-a-code");
 	});
 });

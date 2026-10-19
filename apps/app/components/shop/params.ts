@@ -1,3 +1,4 @@
+import { shopTimezone } from "@crm/pancake/config";
 import { z } from "zod";
 import {
 	pancakeUrl,
@@ -31,7 +32,9 @@ export function shopFilters(
 		: explicit
 			? undefined
 			: defaultRange;
-	const bounds = range && !explicit ? rangeBounds(range) : undefined;
+	const timeZone = shopTimezone(shopId);
+	const bounds =
+		range && !explicit ? rangeBounds(range, new Date(), timeZone) : undefined;
 	const merged: SearchValues = {
 		...values,
 		shopId,
@@ -43,6 +46,7 @@ export function shopFilters(
 		...parsed,
 		input: { ...parsed.input, shopId },
 		range,
+		timeZone,
 		q: text(values, "q"),
 		status: text(values, "status"),
 		sellerId: text(values, "sellerId"),

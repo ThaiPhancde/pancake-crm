@@ -7,7 +7,11 @@ import {
 	customerDetailInput,
 	listInput,
 	recordListInput,
+	reportInput,
 	roleInput,
+	updateAppointmentInput,
+	updateLeadInput,
+	updateTicketInput,
 } from "@crm/pancake/contracts";
 import {
 	createTaskInput,
@@ -226,5 +230,54 @@ export class PancakeRouter {
 		@Input() input: z.infer<typeof createNoteInput>,
 	) {
 		return this.pancake.createNote(ctx.user.id, input);
+	}
+	@Mutation({ input: shopInput })
+	resume(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof shopInput>,
+	) {
+		return this.pancake.resume(ctx.user.id, input.shopId);
+	}
+	@Mutation({ input: updateLeadInput })
+	updateLead(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof updateLeadInput>,
+	) {
+		return this.pancake.updateLead(ctx.user.id, input);
+	}
+	@Mutation({ input: updateAppointmentInput })
+	updateAppointment(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof updateAppointmentInput>,
+	) {
+		return this.pancake.updateAppointment(ctx.user.id, input);
+	}
+	@Mutation({ input: updateTicketInput })
+	updateTicket(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof updateTicketInput>,
+	) {
+		return this.pancake.updateTicket(ctx.user.id, input);
+	}
+	@Query({ input: reportInput })
+	appointmentReport(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof reportInput>,
+	) {
+		return this.pancake.appointmentReport(ctx.user.id, input);
+	}
+	@Query({ input: reportInput })
+	ticketReport(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof reportInput>,
+	) {
+		return this.pancake.ticketReport(ctx.user.id, input);
+	}
+	@Query({ input: reportInput })
+	leadReport(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof reportInput>,
+	) {
+		return this.pancake.leadReport(ctx.user.id, input);
 	}
 }

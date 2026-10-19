@@ -331,6 +331,9 @@ describe("safe PostgreSQL integration", () => {
 		expect(report.cancelled).toBe(1);
 		expect(report.returned).toBe(1);
 		expect(report.revenue).toEqual([{ currency: "VND", amount: "1000000" }]);
+		expect(report.receivedRevenue).toEqual([
+			{ currency: "VND", amount: "1000000" },
+		]);
 		await expectRejected(
 			setMembership(db, userA, {
 				shopId: shopA,

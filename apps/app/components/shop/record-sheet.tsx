@@ -51,13 +51,22 @@ export function FieldInput({
 	users = [],
 	relations = {},
 	defaultValue,
+	locked,
 }: {
 	field: FieldDef;
 	users?: FieldOption[];
 	relations?: RelationOptions;
 	defaultValue?: string;
+	locked?: FieldOption;
 }) {
 	const id = `field-${field.key}`;
+	if (locked)
+		return (
+			<>
+				<Input id={id} value={locked.label} disabled />
+				<input type="hidden" name={field.key} value={locked.value} />
+			</>
+		);
 	const placeholder =
 		field.placeholder ??
 		(field.type === "select" ||
@@ -197,23 +206,29 @@ export function FieldInput({
 	}
 }
 
+type RecordFormProps = {
+	collection: CollectionKey;
+	users?: FieldOption[];
+	relations?: RelationOptions;
+	defaults?: Record<string, string>;
+	locked?: Record<string, FieldOption>;
+	hidden?: Record<string, string>;
+	onDone?: () => void;
+	submitLabel?: string;
+	twoColumns?: boolean;
+};
+
 export function RecordForm({
 	collection,
 	users,
 	relations,
 	defaults = {},
+	locked = {},
+	hidden = {},
 	onDone,
 	submitLabel = "Lưu",
 	twoColumns = true,
-}: {
-	collection: CollectionKey;
-	users?: FieldOption[];
-	relations?: RelationOptions;
-	defaults?: Record<string, string>;
-	onDone?: () => void;
-	submitLabel?: string;
-	twoColumns?: boolean;
-}) {
+}: RecordFormProps) {
 	const definition = COLLECTIONS[collection];
 	const params = useParams<{ shopId?: string }>();
 	const router = useRouter();
@@ -279,6 +294,7 @@ export function RecordForm({
 										users={users}
 										relations={relations}
 										defaultValue={defaults[field.key]}
+										locked={locked[field.key]}
 									/>
 								</Field>
 							))}
@@ -286,6 +302,9 @@ export function RecordForm({
 					</section>
 				))}
 			</div>
+			{Object.entries(hidden).map(([name, value]) => (
+				<input key={name} type="hidden" name={name} value={value} />
+			))}
 			<div className="flex items-center justify-end gap-2 border-t px-5 py-3">
 				<Button
 					type="button"
@@ -324,7 +343,6 @@ export function CreateRecordButton({
 	menu?: { label: string; onSelect?: () => void }[];
 }) {
 	const [open, setOpen] = useState(false);
-	const definition = COLLECTIONS[collection];
 	return (
 		<>
 			<div className="inline-flex">
@@ -356,27 +374,43 @@ export function CreateRecordButton({
 					</DropdownMenu>
 				) : null}
 			</div>
-			<Sheet open={open} onOpenChange={setOpen}>
-				<SheetContent
-					side="right"
-					size={size === "lg" ? "lg" : "md"}
-					className="gap-0 p-0"
-				>
-					<SheetHeader className="border-b px-5 py-4">
-						<SheetTitle className="text-base">
-							{definition.createLabel}
-						</SheetTitle>
-					</SheetHeader>
-					<RecordForm
-						collection={collection}
-						users={users}
-						relations={relations}
-						defaults={defaults}
-						twoColumns={size === "lg"}
-						onDone={() => setOpen(false)}
-					/>
-				</SheetContent>
-			</Sheet>
+			<RecordSheet
+				collection={collection}
+				open={open}
+				onOpenChange={setOpen}
+				size={size}
+				users={users}
+				relations={relations}
+				defaults={defaults}
+			/>
 		</>
+	);
+}
+
+export function RecordSheet({
+	open,
+	onOpenChange,
+	size = "lg",
+	...form
+}: Omit<RecordFormProps, "onDone" | "twoColumns"> & {
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	size?: "lg" | "md";
+}) {
+	return (
+		<Sheet open={open} onOpenChange={onOpenChange}>
+			<SheetContent side="right" size={size} className="gap-0 p-0">
+				<SheetHeader className="border-b px-5 py-4">
+					<SheetTitle className="text-base">
+						{COLLECTIONS[form.collection].createLabel}
+					</SheetTitle>
+				</SheetHeader>
+				<RecordForm
+					{...form}
+					twoColumns={size === "lg"}
+					onDone={() => onOpenChange(false)}
+				/>
+			</SheetContent>
+		</Sheet>
 	);
 }

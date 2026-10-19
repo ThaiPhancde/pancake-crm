@@ -1,3 +1,7 @@
+const DAY_MS = 86_400_000;
+const CANCELLED_STATUSES: readonly number[] = [6, 7];
+const RETURNED_STATUSES: readonly number[] = [4, 5, 15];
+
 export const PANCAKE = {
 	baseUrl: "https://pos.pages.fm/api/v1",
 	pageSize: 100,
@@ -8,10 +12,11 @@ export const PANCAKE = {
 	requestGapMs: 350,
 	pollMs: 60_000,
 	overlapMs: 300_000,
-	reconcileMs: 86_400_000,
+	dayMs: DAY_MS,
+	reconcileMs: DAY_MS,
 	pageBudget: 25,
 	historyPageBudget: 60,
-	recentWindowMs: 172_800_000,
+	recentWindowMs: 2 * DAY_MS,
 	recentPageBudget: 20,
 	transactionMs: 600_000,
 	syncLeaseMs: 900_000,
@@ -21,6 +26,22 @@ export const PANCAKE = {
 	maxListSize: 100,
 	overviewRows: 8,
 	timezone: "Asia/Ho_Chi_Minh",
+	shopTimezone: new Map([
+		["1635200759", "Asia/Dubai"],
+		["1328205216", "Asia/Riyadh"],
+		["1328205226", "Asia/Kuwait"],
+	]),
+	spendWindowDays: 30,
+	receivedStatuses: [3, 16] as readonly number[],
+	cancelledStatuses: CANCELLED_STATUSES,
+	returnedStatuses: RETURNED_STATUSES,
+	bookedExcludedStatuses: [...CANCELLED_STATUSES, ...RETURNED_STATUSES],
+	unassignedValue: "none",
+	anyValue: "all",
+	appointmentDoneStatuses: ["done"] as readonly string[],
+	appointmentCancelledStatuses: ["cancelled"] as readonly string[],
+	ticketDoneStatuses: ["done"] as readonly string[],
+	defaultCurrency: "SAR",
 	// Fallback when an order carries no order_currency.
 	shopCurrency: new Map([
 		["1635200759", "AED"],
@@ -46,7 +67,7 @@ export const ORDER_VIEWS = {
 	all: { name: "Tất cả", statuses: [] as number[] },
 	pending: { name: "Chờ xử lý", statuses: [0, 17, 1, 8, 9, 11, 12, 13, 20] },
 	shipping: { name: "Đang giao", statuses: [2] },
-	returns: { name: "Hoàn hàng", statuses: [4, 5, 15] },
+	returns: { name: "Hoàn hàng", statuses: PANCAKE.returnedStatuses },
 	unassigned: { name: "Chưa phân công", statuses: [] as number[] },
 } as const;
 
@@ -78,6 +99,14 @@ export const STATUS_NAMES = new Map([
 	[6, "Đã hủy"],
 	[7, "Đã xóa"],
 ]);
+
+export function shopTimezone(shopId?: string): string {
+	return (shopId && PANCAKE.shopTimezone.get(shopId)) || PANCAKE.timezone;
+}
+
+export function spendSince(now: Date): Date {
+	return new Date(now.getTime() - PANCAKE.spendWindowDays * PANCAKE.dayMs);
+}
 
 export function assertCrmDatabase(url: string): void {
 	const parsed = new URL(url);

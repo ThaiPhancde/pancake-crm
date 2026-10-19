@@ -470,16 +470,19 @@ export function FilterButton({ fields }: { fields: FieldOption[] }) {
 	);
 }
 
-export function StatsToggle() {
+export function StatsToggle({ defaultOn = false }: { defaultOn?: boolean }) {
 	const search = useSearchParams();
 	const write = useParamWriter();
-	const on = search.get("stats") === "1";
+	const stats = search.get("stats");
+	const on = defaultOn ? stats !== "0" : stats === "1";
 	return (
 		<ToolbarIcon
 			icon={ChartBar}
 			label="Thống kê nhanh"
 			active={on}
-			onClick={() => write({ stats: on ? null : "1" })}
+			onClick={() =>
+				write({ stats: on === defaultOn ? (on ? "0" : "1") : null })
+			}
 		/>
 	);
 }

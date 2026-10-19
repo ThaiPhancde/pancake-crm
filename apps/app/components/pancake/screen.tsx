@@ -420,10 +420,18 @@ export function PancakeScreen({
 						))}
 					</div>
 					<Alert>
-						<AlertTitle>Giá trị đơn của đơn đã nhận / thu tiền</AlertTitle>
+						<AlertTitle>Doanh thu (trừ đơn hủy, xóa và hoàn)</AlertTitle>
 						<AlertDescription>
 							{data.report.revenue.map((row) => (
-								<div key={row.currency}>{amount(row.amount, row.currency)}</div>
+								<div key={row.currency}>
+									{amount(row.amount, row.currency)} · Đã thu:{" "}
+									{amount(
+										data.report?.receivedRevenue.find(
+											(item) => item.currency === row.currency,
+										)?.amount ?? "0",
+										row.currency,
+									)}
+								</div>
 							))}
 							Báo cáo dùng quy ước giá trị đơn hiện tại của shop, cần đối chiếu.
 							Mỗi loại tiền tệ có tổng riêng. Báo cáo chưa trừ phí, thuế và tiền

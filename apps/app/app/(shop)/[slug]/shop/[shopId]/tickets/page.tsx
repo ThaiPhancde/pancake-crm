@@ -1,6 +1,5 @@
-import DataTable from "@carbon/icons-react/es/DataTable";
+import { PANCAKE } from "@crm/pancake/config";
 import { Badge } from "@crm/ui/components/badge";
-import { Icon } from "@crm/ui/components/icon";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
 import { formatDate } from "@/components/pancake/format";
@@ -16,14 +15,16 @@ import {
 	FilterChip,
 	MoreMenu,
 	QuickViewChip,
+	SearchBox,
 	SortButton,
-	ViewSwitch,
 } from "@/components/shop/filter-bar";
 import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { ShopPage, ShopPageBody, ShopPageHeader } from "@/components/shop/page";
 import { type SearchValues, text, withParams } from "@/components/shop/params";
+import { RecordQuickEdit } from "@/components/shop/record-quick-edit";
 import { CreateRecordButton } from "@/components/shop/record-sheet";
+import { optionLabel } from "@/components/shop/report-bars";
 
 export default function TicketsPage(props: {
 	params: Promise<ShopRoute>;
@@ -45,21 +46,34 @@ async function Tickets({
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const pageNum = Math.max(1, Number(text(values, "page") || "1"));
-	const [sellers, tickets] = await Promise.all([
+	const [sellers, tickets, customers] = await Promise.all([
 		ctx.api.sellers.query({ shopId: ctx.shopId }),
 		ctx.api.tickets.query({
 			shopId: ctx.shopId,
 			q: text(values, "q"),
 			status: text(values, "status") || undefined,
+			assigneeId: text(values, "assignee") || undefined,
+			priority: text(values, "priority") || undefined,
+			category: text(values, "category") || undefined,
+			quick: text(values, "quick") || undefined,
 			page: pageNum,
 			pageSize: 25,
+		}),
+		ctx.api.customers.query({
+			shopId: ctx.shopId,
+			pageSize: PANCAKE.maxListSize,
 		}),
 	]);
 	const staff = sellers.map((seller) => ({
 		value: seller.employeeId,
 		label: seller.name,
 	}));
-	const sellerMap = new Map(sellers.map((s) => [s.employeeId, s.name]));
+	const contacts = customers.rows.map((customer) => ({
+		value: customer.customerId,
+		label: customer.phone
+			? `${customer.name ?? customer.phone} · ${customer.phone}`
+			: (customer.name ?? customer.customerId),
+	}));
 	const collection = COLLECTIONS.ticket;
 	const columns = collection.fields
 		.filter((field) => field.list)
@@ -76,13 +90,19 @@ async function Tickets({
 				title={collection.title}
 				description={collection.description}
 				actions={
-					<CreateRecordButton collection="ticket" users={staff} size="md" />
+					<CreateRecordButton
+						collection="ticket"
+						users={staff}
+						relations={{ contact: contacts }}
+						size="md"
+					/>
 				}
 			/>
 			<ShopPageBody>
 				<FilterBar
 					toolbar={
 						<>
+							<SearchBox className="w-56" />
 							<SortButton
 								fields={columns.map((c) => ({ value: c.key, label: c.label }))}
 							/>
@@ -91,15 +111,6 @@ async function Tickets({
 									value: f.key,
 									label: f.label,
 								}))}
-							/>
-							<ViewSwitch
-								options={[
-									{
-										value: "table",
-										label: "Bảng",
-										icon: <Icon icon={DataTable} />,
-									},
-								]}
 							/>
 							<MoreMenu />
 						</>
@@ -132,15 +143,22 @@ async function Tickets({
 						multiple
 						options={TICKET_STATUSES}
 					/>
+					<FilterChip
+						label="Phân công"
+						param="assignee"
+						multiple
+						searchable
+						options={[
+							{ value: "none", label: "Chưa được phân công" },
+							...staff,
+						]}
+					/>
 				</FilterBar>
 				<ListTable
 					columns={columns}
 					rows={tickets.rows.map((ticket) => {
 						const prioOpt = TICKET_PRIORITIES.find(
 							(p) => p.value === ticket.priority,
-						);
-						const statusOpt = TICKET_STATUSES.find(
-							(s) => s.value === ticket.status,
 						);
 						return {
 							key: ticket.id,
@@ -151,18 +169,34 @@ async function Tickets({
 								ticket.phone ?? <Dash />,
 								ticket.email ?? <Dash />,
 								<Dash key="relatedUsers" />,
-								ticket.category ?? <Dash />,
+								ticket.category ? (
+									optionLabel(TICKET_CATEGORIES, ticket.category, "")
+								) : (
+									<Dash key="category" />
+								),
 								<Badge key="prio" variant="orange">
 									{prioOpt?.label ?? ticket.priority}
 								</Badge>,
-								<Badge key="status" variant="blue">
-									{statusOpt?.label ?? ticket.status}
-								</Badge>,
-								ticket.assigneeId ? (
-									(sellerMap.get(ticket.assigneeId) ?? ticket.assigneeId)
-								) : (
-									<Dash key="assignee" />
-								),
+								<RecordQuickEdit
+									key="status"
+									kind="ticket"
+									field="status"
+									id={ticket.id}
+									shopId={ctx.shopId}
+									value={ticket.status}
+									options={TICKET_STATUSES}
+									disabled={!tickets.canWrite}
+								/>,
+								<RecordQuickEdit
+									key="assignee"
+									kind="ticket"
+									field="assigneeId"
+									id={ticket.id}
+									shopId={ctx.shopId}
+									value={ticket.assigneeId}
+									options={staff}
+									disabled={!tickets.canWrite}
+								/>,
 								ticket.dueAt ? formatDate(ticket.dueAt) : <Dash key="dueAt" />,
 							],
 						};

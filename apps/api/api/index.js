@@ -319097,6 +319097,9 @@ var import_common103 = __toESM(require_common(), 1);
 init_zod();
 
 // ../../packages/pancake/src/config.ts
+var DAY_MS5 = 86400000;
+var CANCELLED_STATUSES = [6, 7];
+var RETURNED_STATUSES = [4, 5, 15];
 var PANCAKE = {
   baseUrl: "https://pos.pages.fm/api/v1",
   pageSize: 100,
@@ -319107,10 +319110,11 @@ var PANCAKE = {
   requestGapMs: 350,
   pollMs: 60000,
   overlapMs: 300000,
-  reconcileMs: 86400000,
+  dayMs: DAY_MS5,
+  reconcileMs: DAY_MS5,
   pageBudget: 25,
   historyPageBudget: 60,
-  recentWindowMs: 172800000,
+  recentWindowMs: 2 * DAY_MS5,
   recentPageBudget: 20,
   transactionMs: 600000,
   syncLeaseMs: 900000,
@@ -319120,6 +319124,22 @@ var PANCAKE = {
   maxListSize: 100,
   overviewRows: 8,
   timezone: "Asia/Ho_Chi_Minh",
+  shopTimezone: new Map([
+    ["1635200759", "Asia/Dubai"],
+    ["1328205216", "Asia/Riyadh"],
+    ["1328205226", "Asia/Kuwait"]
+  ]),
+  spendWindowDays: 30,
+  receivedStatuses: [3, 16],
+  cancelledStatuses: CANCELLED_STATUSES,
+  returnedStatuses: RETURNED_STATUSES,
+  bookedExcludedStatuses: [...CANCELLED_STATUSES, ...RETURNED_STATUSES],
+  unassignedValue: "none",
+  anyValue: "all",
+  appointmentDoneStatuses: ["done"],
+  appointmentCancelledStatuses: ["cancelled"],
+  ticketDoneStatuses: ["done"],
+  defaultCurrency: "SAR",
   shopCurrency: new Map([
     ["1635200759", "AED"],
     ["1328205216", "SAR"],
@@ -319142,7 +319162,7 @@ var ORDER_VIEWS = {
   all: { name: "Tất cả", statuses: [] },
   pending: { name: "Chờ xử lý", statuses: [0, 17, 1, 8, 9, 11, 12, 13, 20] },
   shipping: { name: "Đang giao", statuses: [2] },
-  returns: { name: "Hoàn hàng", statuses: [4, 5, 15] },
+  returns: { name: "Hoàn hàng", statuses: PANCAKE.returnedStatuses },
   unassigned: { name: "Chưa phân công", statuses: [] }
 };
 var RESOURCES = [
@@ -319171,6 +319191,12 @@ var STATUS_NAMES = new Map([
   [6, "Đã hủy"],
   [7, "Đã xóa"]
 ]);
+function shopTimezone(shopId) {
+  return shopId && PANCAKE.shopTimezone.get(shopId) || PANCAKE.timezone;
+}
+function spendSince(now2) {
+  return new Date(now2.getTime() - PANCAKE.spendWindowDays * PANCAKE.dayMs);
+}
 
 // ../../packages/pancake/src/contracts.ts
 var sourceId = exports_external.union([exports_external.string().min(1), exports_external.number().int().safe()]).transform(String);
@@ -319344,7 +319370,7 @@ var listInput2 = exports_external.object({
   shopId: exports_external.string().min(1).optional(),
   q: exports_external.string().max(120).default(""),
   status: exports_external.number().int().optional(),
-  sellerId: exports_external.string().max(120).optional(),
+  sellerId: exports_external.string().max(2000).optional(),
   from: exports_external.iso.datetime({ offset: true }).optional(),
   to: exports_external.iso.datetime({ offset: true }).optional(),
   page: exports_external.number().int().min(1).max(1e5).default(1),
@@ -319365,16 +319391,53 @@ var customerDetailInput = exports_external.object({
   shopId: exports_external.string().min(1),
   customerId: exports_external.string().min(1)
 });
+var multiValue = exports_external.string().max(2000).optional();
+var assignableText = (max) => exports_external.string().trim().max(max).nullable().optional().refine((v2) => v2 !== PANCAKE.unassignedValue && v2 !== PANCAKE.anyValue, "Reserved value");
 var recordListInput = exports_external.object({
   shopId: exports_external.string().min(1),
   q: exports_external.string().max(120).default(""),
-  status: exports_external.string().max(80).optional(),
-  assigneeId: exports_external.string().max(120).optional(),
+  status: multiValue,
+  assigneeId: multiValue,
+  creatorId: multiValue,
+  source: multiValue,
+  priority: multiValue,
+  category: multiValue,
+  quick: exports_external.string().max(40).optional(),
   customerId: exports_external.string().max(120).optional(),
   from: exports_external.iso.datetime({ offset: true }).optional(),
   to: exports_external.iso.datetime({ offset: true }).optional(),
   page: exports_external.number().int().min(1).max(1e5).default(1),
   pageSize: exports_external.number().int().min(1).max(PANCAKE.maxListSize).default(25)
+}).refine((v2) => !v2.from || !v2.to || v2.from <= v2.to, "Invalid date range");
+var reportInput = exports_external.object({
+  shopId: exports_external.string().min(1),
+  from: exports_external.iso.datetime({ offset: true }).optional(),
+  to: exports_external.iso.datetime({ offset: true }).optional()
+}).refine((v2) => !v2.from || !v2.to || v2.from <= v2.to, "Invalid date range");
+var updateLeadInput = exports_external.object({
+  id: exports_external.string().min(1),
+  shopId: exports_external.string().min(1),
+  status: exports_external.string().trim().min(1).max(80).optional(),
+  assigneeId: assignableText(120)
+});
+var updateAppointmentInput = exports_external.object({
+  id: exports_external.string().min(1),
+  shopId: exports_external.string().min(1),
+  title: exports_external.string().trim().min(1).max(160).optional(),
+  note: exports_external.string().trim().max(2000).optional(),
+  status: exports_external.string().trim().min(1).max(80).optional(),
+  startAt: exports_external.iso.datetime({ offset: true }).optional(),
+  endAt: exports_external.iso.datetime({ offset: true }).nullable().optional(),
+  assigneeId: assignableText(120)
+}).refine((v2) => !v2.endAt || v2.startAt !== undefined && Date.parse(v2.startAt) <= Date.parse(v2.endAt), "Invalid date range");
+var updateTicketInput = exports_external.object({
+  id: exports_external.string().min(1),
+  shopId: exports_external.string().min(1),
+  status: exports_external.string().trim().min(1).max(80).optional(),
+  priority: exports_external.string().trim().min(1).max(80).optional(),
+  category: assignableText(120),
+  assigneeId: assignableText(120),
+  dueAt: exports_external.iso.datetime({ offset: true }).nullable().optional()
 });
 var createLeadInput = exports_external.object({
   shopId: exports_external.string().min(1),
@@ -319482,6 +319545,15 @@ function orderScope(grants, requestedShop) {
     OR: selected.map((grant) => grant.role === "TELESALE" ? { shopId: grant.shopId, sellerId: grant.employeeId ?? "__unmapped__" } : { shopId: grant.shopId })
   };
 }
+function canWrite(grants, shopId) {
+  return grants.some((grant) => grant.shopId === shopId && grant.role !== "VIEWER");
+}
+async function assertShopWriter(db4, userId, shopId) {
+  const grants = await shopGrants(db4, userId);
+  if (!canWrite(grants, shopId))
+    throw new PancakeAccessError;
+  return grants;
+}
 async function assertShopManager(db4, userId, shopId) {
   const grants = await shopGrants(db4, userId);
   if (!grants.some((grant) => grant.shopId === shopId && grant.role === "MANAGER"))
@@ -319521,9 +319593,9 @@ class PancakeTaskConflict extends Error {
   }
 }
 async function writableOrder(db4, userId, shopId, orderId) {
-  const grants = await shopGrants(db4, userId);
+  const grants = await assertShopWriter(db4, userId, shopId);
   const grant = grants.find((entry) => entry.shopId === shopId);
-  if (!grant || grant.role === "VIEWER")
+  if (!grant)
     throw new PancakeAccessError;
   const order = await db4.pancakeOrder.findFirst({
     where: { AND: [orderScope(grants, shopId), { shopId, orderId }] },
@@ -319687,6 +319759,90 @@ function phoneTail(phone, dial) {
 }
 
 // ../../packages/pancake/src/queries.ts
+function splitList(raw4) {
+  return [
+    ...new Set((raw4 ?? "").split(",").map((value) => value.trim()).filter((value) => value && value !== PANCAKE.anyValue))
+  ];
+}
+function inList(raw4, clause) {
+  const values = splitList(raw4);
+  return values.length ? clause(values) : {};
+}
+function inListOrNone(raw4, clause, none2) {
+  const values = splitList(raw4);
+  const named = values.filter((value) => value !== PANCAKE.unassignedValue);
+  const clauses = [];
+  if (named.length)
+    clauses.push(clause(named));
+  if (named.length < values.length)
+    clauses.push(none2);
+  return clauses.length ? { OR: clauses } : {};
+}
+function dateRange(from, to) {
+  if (!from && !to)
+    return;
+  return {
+    gte: from ? new Date(from) : undefined,
+    lt: to ? new Date(to) : undefined
+  };
+}
+function zonedDay(instant, timeZone) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(instant);
+}
+function zonedMidnight(day2, timeZone) {
+  const guess = new Date(`${day2}T00:00:00Z`);
+  const parts = new Map(new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric"
+  }).formatToParts(guess).map((part) => [part.type, Number(part.value)]));
+  const local = Date.UTC(parts.get("year") ?? 0, (parts.get("month") ?? 1) - 1, parts.get("day") ?? 1, parts.get("hour") ?? 0, parts.get("minute") ?? 0, parts.get("second") ?? 0);
+  return new Date(guess.getTime() - (local - guess.getTime()));
+}
+function weekStart(now2, timeZone) {
+  const today = zonedDay(now2, timeZone);
+  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+  const monday = new Date(Date.parse(`${today}T00:00:00Z`) - (weekday + 6) % 7 * PANCAKE.dayMs);
+  return zonedMidnight(monday.toISOString().slice(0, 10), timeZone);
+}
+function fillDays(buckets, range, now2, timeZone, empty4) {
+  const known = [...buckets.keys()].sort();
+  const start = range.from ? zonedDay(new Date(range.from), timeZone) : known[0];
+  if (!start)
+    return [];
+  const endAt = Math.min(range.to ? Date.parse(range.to) : now2.getTime(), now2.getTime());
+  const end = Date.parse(`${zonedDay(new Date(endAt - 1), timeZone)}T00:00:00Z`);
+  const days = [];
+  for (let at = Date.parse(`${start}T00:00:00Z`);at <= end; at += PANCAKE.dayMs)
+    days.push(new Date(at).toISOString().slice(0, 10));
+  return [...new Set([...days, ...known])].sort().map((day2) => buckets.get(day2) ?? empty4(day2));
+}
+function bookedWhere() {
+  return { status: { notIn: [...PANCAKE.bookedExcludedStatuses] } };
+}
+function recentSpendWhere(now2) {
+  return { ...bookedWhere(), sourceCreatedAt: { gte: spendSince(now2) } };
+}
+async function creatorUserIds(db4, shopId, raw4) {
+  const values = splitList(raw4);
+  if (!values.length)
+    return [];
+  const members = await db4.pancakeShopMember.findMany({
+    where: { shopId, employeeId: { in: values } },
+    select: { userId: true }
+  });
+  return [...new Set([...values, ...members.map((m3) => m3.userId)])];
+}
 function parseEmployeeMeta(raw4) {
   const parsed = employeeWire.safeParse(raw4);
   if (!parsed.success) {
@@ -319709,15 +319865,9 @@ function parseEmployeeMeta(raw4) {
   };
 }
 function filteredOrders(scope, input2) {
-  const created = {};
-  if (input2.from)
-    created.gte = new Date(input2.from);
-  if (input2.to)
-    created.lt = new Date(input2.to);
   const filters = {
     status: input2.status,
-    sellerId: input2.sellerId || undefined,
-    sourceCreatedAt: input2.from || input2.to ? created : undefined,
+    sourceCreatedAt: dateRange(input2.from, input2.to),
     OR: input2.q ? [
       { orderId: { contains: input2.q } },
       { customerName: { contains: input2.q, mode: "insensitive" } },
@@ -319730,6 +319880,9 @@ function filteredOrders(scope, input2) {
     AND: [
       scope,
       filters,
+      inListOrNone(input2.sellerId, (ids) => ({ sellerId: { in: ids } }), {
+        sellerId: null
+      }),
       input2.view === "unassigned" ? { sellerId: null } : view.statuses.length ? { status: { in: [...view.statuses] } } : {}
     ]
   };
@@ -319837,7 +319990,7 @@ async function orderDetail(db4, userId, shopId, orderId) {
   return {
     shopId,
     orderId,
-    canCreateTask: grants.some((grant) => grant.shopId === shopId && grant.role !== "VIEWER"),
+    canCreateTask: canWrite(grants, shopId),
     customerId: row.customerId,
     customerName: row.customerName,
     shippingHistory: (incoming.partner?.extend_update ?? []).map((event) => ({
@@ -319873,15 +320026,18 @@ async function orderDetail(db4, userId, shopId, orderId) {
     }))
   };
 }
+function spendAmounts(groups) {
+  return groups.map((g2) => ({
+    currency: g2.currency,
+    amount: g2._sum.totalPrice?.toString() ?? "0"
+  }));
+}
 async function listCustomers(db4, userId, input2) {
   const grants = await shopGrants(db4, userId);
   const oScope = orderScope(grants, input2.shopId);
   const selected = input2.shopId ? grants.filter((grant) => grant.shopId === input2.shopId) : grants;
-  const createdFilter = {};
-  if (input2.from)
-    createdFilter.gte = new Date(input2.from);
-  if (input2.to)
-    createdFilter.lt = new Date(input2.to);
+  const created = dateRange(input2.from, input2.to);
+  const now2 = new Date;
   const where = {
     AND: [
       {
@@ -319897,7 +320053,7 @@ async function listCustomers(db4, userId, input2) {
           ]
         } : { shopId: grant.shopId })
       },
-      input2.sellerId ? { assignedEmployeeId: input2.sellerId } : {},
+      inListOrNone(input2.sellerId, (ids) => ({ assignedEmployeeId: { in: ids } }), { assignedEmployeeId: null }),
       input2.q ? {
         OR: [
           { name: { contains: input2.q, mode: "insensitive" } },
@@ -319930,16 +320086,10 @@ async function listCustomers(db4, userId, input2) {
       take: input2.pageSize
     }),
     db4.pancakeCustomer.count({ where }),
-    db4.pancakeOrder.aggregate({
-      where: {
-        AND: [
-          oScope,
-          { status: { in: [3, 16] } },
-          input2.from || input2.to ? { sourceCreatedAt: createdFilter } : {}
-        ]
-      },
-      _sum: { totalPrice: true },
-      _count: { _all: true }
+    db4.pancakeOrder.groupBy({
+      by: ["currency"],
+      where: { AND: [oScope, recentSpendWhere(now2)] },
+      _sum: { totalPrice: true }
     }),
     db4.pancakeOrder.groupBy({
       by: ["customerPhone"],
@@ -319947,7 +320097,7 @@ async function listCustomers(db4, userId, input2) {
         AND: [
           oScope,
           { customerPhone: { not: null } },
-          input2.from || input2.to ? { sourceCreatedAt: createdFilter } : {}
+          created ? { sourceCreatedAt: created } : {}
         ]
       },
       _count: { _all: true }
@@ -319967,35 +320117,41 @@ async function listCustomers(db4, userId, input2) {
     { name: s.name, avatarUrl: parseEmployeeMeta(s.raw).avatarUrl }
   ]));
   const customerIds = rows.map((r2) => r2.customerId);
-  const customerOrderGroups = customerIds.length ? await db4.pancakeOrder.groupBy({
-    by: ["shopId", "customerId"],
-    where: {
-      shopId: { in: selected.map((grant) => grant.shopId) },
-      customerId: { in: customerIds }
-    },
-    _count: { _all: true },
-    _sum: { totalPrice: true }
-  }) : [];
-  const orderCountsByCust = new Map(customerOrderGroups.map((g2) => [
-    `${g2.shopId}:${g2.customerId}`,
-    {
-      count: g2._count._all,
-      spent: g2._sum.totalPrice?.toString() ?? "0"
-    }
-  ]));
+  const customerOrders = {
+    AND: [oScope, { customerId: { in: customerIds } }]
+  };
+  const [countGroups, spendGroups] = customerIds.length ? await Promise.all([
+    db4.pancakeOrder.groupBy({
+      by: ["shopId", "customerId"],
+      where: { AND: [customerOrders, bookedWhere()] },
+      _count: { _all: true }
+    }),
+    db4.pancakeOrder.groupBy({
+      by: ["shopId", "customerId", "currency"],
+      where: { AND: [customerOrders, recentSpendWhere(now2)] },
+      _sum: { totalPrice: true }
+    })
+  ]) : [[], []];
+  const orderCounts = new Map(countGroups.map((g2) => [`${g2.shopId}:${g2.customerId}`, g2._count._all]));
+  const spentByCustomer = new Map;
+  for (const g2 of spendGroups) {
+    const key = `${g2.shopId}:${g2.customerId}`;
+    spentByCustomer.set(key, [
+      ...spentByCustomer.get(key) ?? [],
+      ...spendAmounts([g2])
+    ]);
+  }
   const buyersWithPhone = repeatGroups.length;
   const returningBuyers = repeatGroups.filter((g2) => g2._count._all > 1).length;
   const returningRate = buyersWithPhone ? Number((100 * returningBuyers / buyersWithPhone).toFixed(1)) : 0;
-  const currency = input2.shopId ? PANCAKE.shopCurrency.get(input2.shopId) ?? "SAR" : "SAR";
+  const currency = input2.shopId ? PANCAKE.shopCurrency.get(input2.shopId) ?? PANCAKE.defaultCurrency : PANCAKE.defaultCurrency;
   return {
     rows: rows.map(({ assignedEmployeeId, raw: raw4, sourceUpdatedAt, fetchedAt, ...row }) => {
       const parsed = customerWire.safeParse(raw4);
       const emp = assignedEmployeeId ? staffMap.get(`${row.shopId}:${assignedEmployeeId}`) : undefined;
-      const ordAgg = orderCountsByCust.get(`${row.shopId}:${row.customerId}`);
-      const rawOrderCount = parsed.success ? parsed.data.order_count ?? 0 : 0;
-      const rawSpent = parsed.success ? parsed.data.purchased_amount ?? 0 : 0;
-      const orderCount = Math.max(rawOrderCount, ordAgg?.count ?? 0);
-      const purchasedAmount = Number(ordAgg?.spent ?? 0) > rawSpent ? ordAgg?.spent ?? "0" : String(rawSpent);
+      const key = `${row.shopId}:${row.customerId}`;
+      const orderCount = orderCounts.get(key) ?? 0;
+      const purchasedAmounts = spentByCustomer.get(key) ?? [];
       const source = parsed.success ? parsed.data.pages_customers?.[0]?.platform ?? parsed.data.pages_customers?.[0]?.name ?? null : null;
       const birthday = parsed.success ? parsed.data.date_of_birth ?? null : null;
       const gender = parsed.success ? parsed.data.gender ?? null : null;
@@ -320014,7 +320170,7 @@ async function listCustomers(db4, userId, input2) {
         tags,
         address,
         orderCount,
-        purchasedAmount,
+        purchasedAmounts,
         conversationLink,
         createdAt
       };
@@ -320022,7 +320178,8 @@ async function listCustomers(db4, userId, input2) {
     total,
     summary: {
       newContacts: total,
-      totalSpent: orderStats._sum.totalPrice?.toString() ?? "0",
+      totalSpent: spendAmounts(orderStats),
+      spendWindowDays: PANCAKE.spendWindowDays,
       returningRate,
       currency
     }
@@ -320048,9 +320205,13 @@ async function customerDetail(db4, userId, shopId, customerId) {
   }) : null;
   const tail = phoneTail(customer.phone, PANCAKE.shopDialCode.get(shopId));
   const personWhere = tail ? { OR: [{ customerId }, { customerPhone: { endsWith: tail } }] } : { customerId };
-  const [orders, notes, appointments, tickets] = await Promise.all([
+  const personOrders = {
+    AND: [scope, { shopId }, personWhere]
+  };
+  const now2 = new Date;
+  const [orders, notes, appointments, tickets, statusCounts, recent] = await Promise.all([
     db4.pancakeOrder.findMany({
-      where: { AND: [scope, { shopId }, personWhere] },
+      where: personOrders,
       select: { ...orderSelect, raw: true },
       orderBy: [{ sourceCreatedAt: "desc" }, { orderId: "desc" }],
       take: 50
@@ -320069,6 +320230,17 @@ async function customerDetail(db4, userId, shopId, customerId) {
       where: { shopId, customerId },
       orderBy: { createdAt: "desc" },
       take: 50
+    }),
+    db4.pancakeOrder.groupBy({
+      by: ["status"],
+      where: personOrders,
+      _count: { _all: true }
+    }),
+    db4.pancakeOrder.groupBy({
+      by: ["currency"],
+      where: { AND: [personOrders, recentSpendWhere(now2)] },
+      _sum: { totalPrice: true },
+      _count: { _all: true }
     })
   ]);
   const orderIds = orders.map((o3) => o3.orderId);
@@ -320077,20 +320249,11 @@ async function customerDetail(db4, userId, shopId, customerId) {
     include: { assignee: { select: { id: true, name: true } } },
     orderBy: { dueAt: "asc" }
   }) : [];
-  let totalSpent = new exports_prismaNamespace.Decimal(0);
-  let deliveredCount = 0;
-  for (const ord of orders) {
-    if ([3, 16].includes(ord.status)) {
-      deliveredCount += 1;
-      totalSpent = totalSpent.add(ord.totalPrice);
-    }
-  }
-  const rawSpent = parsed.success ? parsed.data.purchased_amount ?? 0 : 0;
-  const spentStr = totalSpent.toNumber() > rawSpent ? totalSpent.toString() : String(rawSpent);
-  const rawCount = parsed.success ? parsed.data.order_count ?? 0 : 0;
-  const orderCount = Math.max(orders.length, rawCount);
+  const countStatuses = (statuses, include) => statusCounts.reduce((sum, row) => statuses.includes(row.status) === include ? sum + row._count._all : sum, 0);
+  const orderCount = countStatuses(PANCAKE.bookedExcludedStatuses, false);
+  const deliveredCount = countStatuses(PANCAKE.receivedStatuses, true);
   const empMeta = employee ? parseEmployeeMeta(employee.raw) : null;
-  const currency = orders[0]?.currency ?? PANCAKE.shopCurrency.get(shopId) ?? "SAR";
+  const currency = orders[0]?.currency ?? PANCAKE.shopCurrency.get(shopId) ?? PANCAKE.defaultCurrency;
   return {
     shopId,
     customerId: customer.customerId,
@@ -320108,9 +320271,12 @@ async function customerDetail(db4, userId, shopId, customerId) {
     conversationLink: parsed.success ? parsed.data.conversation_link ?? null : null,
     createdAt: (parsed.success && parsed.data.inserted_at ? sourceDate(parsed.data.inserted_at) : customer.sourceUpdatedAt ?? customer.fetchedAt).toISOString(),
     updatedAt: (customer.sourceUpdatedAt ?? customer.fetchedAt).toISOString(),
+    canWrite: canWrite(grants, shopId),
     orderCount,
     deliveredCount,
-    totalSpent: spentStr,
+    totalSpent: spendAmounts(recent),
+    recentOrderCount: recent.reduce((sum, g2) => sum + g2._count._all, 0),
+    spendWindowDays: PANCAKE.spendWindowDays,
     currency,
     orders: orders.map(({ raw: raw4, ...ord }) => {
       const p2 = orderWire.safeParse(raw4);
@@ -320318,22 +320484,73 @@ async function sellerOptions(db4, userId, shopId) {
     ...parseEmployeeMeta(raw4)
   }));
 }
+var dailyRow = exports_external.object({
+  day: exports_external.string(),
+  orders: exports_external.number(),
+  delivered: exports_external.number(),
+  revenue: exports_external.number(),
+  received: exports_external.number()
+});
+function orderSqlWhere(grants, input2) {
+  const selected = input2.shopId ? grants.filter((grant) => grant.shopId === input2.shopId) : grants;
+  const scope = selected.length ? exports_prismaNamespace.join(selected.map((grant) => grant.role === "TELESALE" ? exports_prismaNamespace.sql`(o."shopId" = ${grant.shopId} AND o."sellerId" = ${grant.employeeId ?? "__unmapped__"})` : exports_prismaNamespace.sql`o."shopId" = ${grant.shopId}`), " OR ") : exports_prismaNamespace.sql`FALSE`;
+  const clauses = [exports_prismaNamespace.sql`(${scope})`];
+  if (input2.status !== undefined)
+    clauses.push(exports_prismaNamespace.sql`o.status = ${input2.status}`);
+  if (input2.from)
+    clauses.push(exports_prismaNamespace.sql`o."sourceCreatedAt" >= (${input2.from}::timestamptz AT TIME ZONE 'UTC')`);
+  if (input2.to)
+    clauses.push(exports_prismaNamespace.sql`o."sourceCreatedAt" < (${input2.to}::timestamptz AT TIME ZONE 'UTC')`);
+  const sellers = splitList(input2.sellerId);
+  const namedSellers = sellers.filter((value) => value !== PANCAKE.unassignedValue);
+  const sellerClauses = [
+    ...namedSellers.length ? [exports_prismaNamespace.sql`o."sellerId" IN (${exports_prismaNamespace.join(namedSellers)})`] : [],
+    ...namedSellers.length < sellers.length ? [exports_prismaNamespace.sql`o."sellerId" IS NULL`] : []
+  ];
+  if (sellerClauses.length)
+    clauses.push(exports_prismaNamespace.sql`(${exports_prismaNamespace.join(sellerClauses, " OR ")})`);
+  const view = ORDER_VIEWS[input2.view];
+  if (input2.view === "unassigned")
+    clauses.push(exports_prismaNamespace.sql`o."sellerId" IS NULL`);
+  else if (view.statuses.length)
+    clauses.push(exports_prismaNamespace.sql`o.status IN (${exports_prismaNamespace.join([...view.statuses])})`);
+  if (input2.q) {
+    const like = `%${input2.q}%`;
+    clauses.push(exports_prismaNamespace.sql`(o."orderId" LIKE ${like} OR o."customerName" ILIKE ${like} OR o."customerPhone" LIKE ${like} OR o."trackingCode" LIKE ${like})`);
+  }
+  return exports_prismaNamespace.join(clauses, " AND ");
+}
+async function dailyOrderSeries(db4, grants, input2, now2, currency) {
+  const received = exports_prismaNamespace.join([...PANCAKE.receivedStatuses]);
+  const excluded = exports_prismaNamespace.join([...PANCAKE.bookedExcludedStatuses]);
+  const timeZone = shopTimezone(input2.shopId);
+  const rows = exports_external.array(dailyRow).parse(await db4.$queryRaw`
+			SELECT to_char((o."sourceCreatedAt" AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD') AS day,
+				count(*)::float8 AS orders,
+				(count(*) FILTER (WHERE o.status IN (${received})))::float8 AS delivered,
+				COALESCE(sum(o."totalPrice") FILTER (WHERE o.currency = ${currency} AND o.status NOT IN (${excluded})), 0)::float8 AS revenue,
+				COALESCE(sum(o."totalPrice") FILTER (WHERE o.currency = ${currency} AND o.status IN (${received})), 0)::float8 AS received
+			FROM "pancakeOrder" o
+			WHERE ${orderSqlWhere(grants, input2)}
+			GROUP BY 1
+			ORDER BY 1`);
+  return fillDays(new Map(rows.map(({ day: day2, ...row }) => [day2, { date: day2, ...row }])), input2, now2, timeZone, (day2) => ({ date: day2, orders: 0, delivered: 0, revenue: 0, received: 0 }));
+}
+function addAmount(totals, currency, amount) {
+  totals.set(currency, (totals.get(currency) ?? new exports_prismaNamespace.Decimal(0)).add(amount));
+}
+function amounts(totals) {
+  return [...totals].map(([currency, amount]) => ({
+    currency,
+    amount: amount.toString()
+  }));
+}
 async function dashboardReport(db4, userId, input2) {
   const grants = await shopGrants(db4, userId);
-  const scope = orderScope(grants, input2.shopId);
-  const where = filteredOrders(scope, input2);
-  const [groups, orderDates, employees] = await Promise.all([
+  orderScope(grants, input2.shopId);
+  const now2 = new Date;
+  const [groups, employees] = await Promise.all([
     revenueReport(db4, userId, input2),
-    db4.pancakeOrder.findMany({
-      where,
-      select: {
-        sourceCreatedAt: true,
-        status: true,
-        totalPrice: true
-      },
-      orderBy: { sourceCreatedAt: "asc" },
-      take: 1e4
-    }),
     db4.pancakeEmployee.findMany({
       where: {
         shopId: input2.shopId ?? { in: grants.map((g2) => g2.shopId) }
@@ -320346,23 +320563,30 @@ async function dashboardReport(db4, userId, input2) {
     parseEmployeeMeta(e3.raw).avatarUrl
   ]));
   const performance2 = new Map;
-  const currencies = new Map;
+  const booked = new Map;
+  const bookedOrders = new Map;
+  const collected = new Map;
   let orders = 0;
   let delivered = 0;
   let cancelled = 0;
   let returned = 0;
   for (const group of groups) {
     orders += group.orders;
-    const received = [3, 16].includes(group.status);
-    const cancelledStatus = [6, 7].includes(group.status);
-    const returnedStatus = [4, 5, 15].includes(group.status);
-    if (received) {
+    const isReceived = PANCAKE.receivedStatuses.includes(group.status);
+    const isBooked = !PANCAKE.bookedExcludedStatuses.includes(group.status);
+    const isCancelled = PANCAKE.cancelledStatuses.includes(group.status);
+    const isReturned = PANCAKE.returnedStatuses.includes(group.status);
+    if (isReceived) {
       delivered += group.orders;
-      currencies.set(group.currency, (currencies.get(group.currency) ?? new exports_prismaNamespace.Decimal(0)).add(group.productValue));
+      addAmount(collected, group.currency, group.productValue);
     }
-    if (cancelledStatus)
+    if (isBooked) {
+      addAmount(booked, group.currency, group.productValue);
+      bookedOrders.set(group.currency, (bookedOrders.get(group.currency) ?? 0) + group.orders);
+    }
+    if (isCancelled)
       cancelled += group.orders;
-    if (returnedStatus)
+    if (isReturned)
       returned += group.orders;
     const key = JSON.stringify([group.shopId, group.sellerId, group.currency]);
     const row = performance2.get(key) ?? {
@@ -320375,48 +320599,42 @@ async function dashboardReport(db4, userId, input2) {
       delivered: 0,
       cancelled: 0,
       returned: 0,
-      revenue: new exports_prismaNamespace.Decimal(0)
+      revenue: new exports_prismaNamespace.Decimal(0),
+      received: new exports_prismaNamespace.Decimal(0)
     };
     row.orders += group.orders;
-    if (received) {
+    if (isReceived) {
       row.delivered += group.orders;
-      row.revenue = row.revenue.add(group.productValue);
+      row.received = row.received.add(group.productValue);
     }
-    if (cancelledStatus)
+    if (isBooked)
+      row.revenue = row.revenue.add(group.productValue);
+    if (isCancelled)
       row.cancelled += group.orders;
-    if (returnedStatus)
+    if (isReturned)
       row.returned += group.orders;
     performance2.set(key, row);
   }
-  const dailyMap = new Map;
-  for (const item of orderDates) {
-    const day2 = item.sourceCreatedAt.toISOString().slice(0, 10);
-    const bucket2 = dailyMap.get(day2) ?? {
-      date: day2,
-      orders: 0,
-      delivered: 0,
-      revenue: 0
-    };
-    bucket2.orders += 1;
-    if ([3, 16].includes(item.status)) {
-      bucket2.delivered += 1;
-      bucket2.revenue += Number(item.totalPrice);
-    }
-    dailyMap.set(day2, bucket2);
-  }
+  const seriesCurrency = [...booked].sort((a3, b2) => b2[1].comparedTo(a3[1]))[0]?.[0] ?? PANCAKE.shopCurrency.get(input2.shopId ?? "") ?? PANCAKE.defaultCurrency;
+  const dailySeries = await dailyOrderSeries(db4, grants, input2, now2, seriesCurrency);
   return {
     orders,
     delivered,
     cancelled,
     returned,
-    revenue: [...currencies].map(([currency, amount]) => ({
+    timezone: shopTimezone(input2.shopId),
+    revenue: amounts(booked),
+    receivedRevenue: amounts(collected),
+    averageOrderValue: [...booked].map(([currency, amount]) => ({
       currency,
-      amount: amount.toString()
+      amount: amount.div(bookedOrders.get(currency) || 1).toString()
     })),
-    dailySeries: [...dailyMap.values()],
+    seriesCurrency,
+    dailySeries,
     performance: [...performance2.values()].map((row) => ({
       ...row,
       revenue: row.revenue.toString(),
+      received: row.received.toString(),
       deliveredRate: row.orders ? `${(100 * row.delivered / row.orders).toFixed(1)}%` : "0%"
     }))
   };
@@ -320455,7 +320673,7 @@ async function connectionStatus(db4, userId) {
   });
   return shops.map((shop) => ({
     ...shop,
-    currency: PANCAKE.shopCurrency.get(shop.id) ?? "SAR",
+    currency: PANCAKE.shopCurrency.get(shop.id) ?? PANCAKE.defaultCurrency,
     ordersCount: shop._count.orders,
     customersCount: shop._count.customers,
     employeesCount: shop._count.employees,
@@ -320601,6 +320819,14 @@ async function pauseShop(db4, userId, shopId) {
   });
   return { paused: true };
 }
+async function resumeShop(db4, userId, shopId) {
+  await assertWorkspaceAdmin(db4, userId);
+  await db4.pancakeShop.update({
+    where: { id: shopId },
+    data: { enabled: true }
+  });
+  return { paused: false };
+}
 async function membershipOptions(db4, userId, shopId) {
   await assertShopManager(db4, userId, shopId);
   const [users, employees, members] = await Promise.all([
@@ -320628,18 +320854,114 @@ async function membershipOptions(db4, userId, shopId) {
     members
   };
 }
-async function listLeads(db4, userId, input2) {
+var leadFields = exports_external.record(exports_external.string(), exports_external.string()).catch({});
+function leadRow(row) {
+  return {
+    ...row,
+    fields: leadFields.parse(row.fields),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
+  };
+}
+function appointmentRow(row) {
+  return {
+    ...row,
+    startAt: row.startAt.toISOString(),
+    endAt: row.endAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
+  };
+}
+function ticketRow(row) {
+  return {
+    ...row,
+    dueAt: row.dueAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
+  };
+}
+function nullableDate(value) {
+  return value === undefined ? undefined : value ? new Date(value) : null;
+}
+function nullableText2(value) {
+  return value === undefined ? undefined : value || null;
+}
+async function contactNameFor(db4, shopId, input2) {
+  if (input2.contactName || !input2.customerId)
+    return input2.contactName ?? null;
+  const customer = await db4.pancakeCustomer.findUnique({
+    where: { shopId_customerId: { shopId, customerId: input2.customerId } },
+    select: { name: true }
+  });
+  return customer?.name ?? null;
+}
+function ownedRecords(grants, shopId, userId, assigneeId) {
+  const grant = grants.find((item) => item.shopId === shopId);
+  if (grant?.role !== "TELESALE")
+    return {};
+  if (assigneeId && assigneeId !== grant.employeeId)
+    throw new PancakeAccessError;
+  return {
+    OR: [
+      { createdById: userId },
+      ...grant.employeeId ? [{ assigneeId: grant.employeeId }] : []
+    ]
+  };
+}
+function overdueTicket(now2) {
+  return {
+    dueAt: { lt: now2 },
+    status: { notIn: [...PANCAKE.ticketDoneStatuses] }
+  };
+}
+async function recordAccess(db4, userId, input2) {
   const grants = await shopGrants(db4, userId);
   orderScope(grants, input2.shopId);
+  const creators = await creatorUserIds(db4, input2.shopId, input2.creatorId);
+  return {
+    grants,
+    writable: canWrite(grants, input2.shopId),
+    creator: creators.length ? { createdById: { in: creators } } : {}
+  };
+}
+async function listLeads(db4, userId, input2) {
+  const { grants, writable, creator } = await recordAccess(db4, userId, input2);
+  const now2 = new Date;
+  const employeeId = grants.find((grant) => grant.shopId === input2.shopId)?.employeeId;
+  const mine = {
+    OR: [
+      { createdById: userId },
+      ...employeeId ? [{ assigneeId: employeeId }] : []
+    ]
+  };
+  const quick = input2.quick === "mine-new" ? { AND: [mine, { status: "new" }] } : input2.quick === "mine-week" ? {
+    AND: [
+      mine,
+      {
+        createdAt: { gte: weekStart(now2, shopTimezone(input2.shopId)) }
+      }
+    ]
+  } : {};
   const where = {
-    shopId: input2.shopId,
-    status: input2.status || undefined,
-    assigneeId: input2.assigneeId || undefined,
-    OR: input2.q ? [
-      { name: { contains: input2.q, mode: "insensitive" } },
-      { phone: { contains: input2.q } },
-      { email: { contains: input2.q, mode: "insensitive" } }
-    ] : undefined
+    AND: [
+      { shopId: input2.shopId, createdAt: dateRange(input2.from, input2.to) },
+      inList(input2.status, (ids) => ({ status: { in: ids } })),
+      inListOrNone(input2.assigneeId, (ids) => ({ assigneeId: { in: ids } }), {
+        assigneeId: null
+      }),
+      inListOrNone(input2.source, (ids) => ({ source: { in: ids } }), {
+        source: null
+      }),
+      creator,
+      quick,
+      input2.q ? {
+        OR: [
+          { name: { contains: input2.q, mode: "insensitive" } },
+          { phone: { contains: input2.q } },
+          { email: { contains: input2.q, mode: "insensitive" } }
+        ]
+      } : {}
+    ]
   };
   const [rows, total] = await Promise.all([
     db4.pancakeLead.findMany({
@@ -320650,19 +320972,10 @@ async function listLeads(db4, userId, input2) {
     }),
     db4.pancakeLead.count({ where })
   ]);
-  return {
-    total,
-    rows: rows.map((row) => ({
-      ...row,
-      fields: exports_external.record(exports_external.string(), exports_external.string()).catch({}).parse(row.fields),
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString()
-    }))
-  };
+  return { total, canWrite: writable, rows: rows.map(leadRow) };
 }
 async function createLead(db4, userId, input2) {
-  const grants = await shopGrants(db4, userId);
-  orderScope(grants, input2.shopId);
+  await assertShopWriter(db4, userId, input2.shopId);
   const row = await db4.pancakeLead.create({
     data: {
       shopId: input2.shopId,
@@ -320677,32 +320990,50 @@ async function createLead(db4, userId, input2) {
       createdById: userId
     }
   });
-  return {
-    ...row,
-    fields: exports_external.record(exports_external.string(), exports_external.string()).catch({}).parse(row.fields),
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString()
-  };
+  return leadRow(row);
+}
+async function updateLead(db4, userId, input2) {
+  const grants = await assertShopWriter(db4, userId, input2.shopId);
+  const { count } = await db4.pancakeLead.updateMany({
+    where: {
+      id: input2.id,
+      shopId: input2.shopId,
+      ...ownedRecords(grants, input2.shopId, userId, input2.assigneeId)
+    },
+    data: {
+      status: input2.status,
+      assigneeId: nullableText2(input2.assigneeId)
+    }
+  });
+  if (!count)
+    throw new PancakeAccessError;
+  return leadRow(await db4.pancakeLead.findUniqueOrThrow({ where: { id: input2.id } }));
 }
 async function listAppointments(db4, userId, input2) {
-  const grants = await shopGrants(db4, userId);
-  orderScope(grants, input2.shopId);
-  const startFilter = {};
-  if (input2.from)
-    startFilter.gte = new Date(input2.from);
-  if (input2.to)
-    startFilter.lt = new Date(input2.to);
+  const { writable, creator } = await recordAccess(db4, userId, input2);
   const where = {
-    shopId: input2.shopId,
-    status: input2.status || undefined,
-    assigneeId: input2.assigneeId || undefined,
-    customerId: input2.customerId || undefined,
-    startAt: input2.from || input2.to ? startFilter : undefined,
-    OR: input2.q ? [
-      { title: { contains: input2.q, mode: "insensitive" } },
-      { contactName: { contains: input2.q, mode: "insensitive" } },
-      { phone: { contains: input2.q } }
-    ] : undefined
+    AND: [
+      {
+        shopId: input2.shopId,
+        customerId: input2.customerId || undefined,
+        startAt: dateRange(input2.from, input2.to)
+      },
+      inList(input2.status, (ids) => ({ status: { in: ids } })),
+      inListOrNone(input2.assigneeId, (ids) => ({ assigneeId: { in: ids } }), {
+        assigneeId: null
+      }),
+      inListOrNone(input2.source, (ids) => ({ source: { in: ids } }), {
+        source: null
+      }),
+      creator,
+      input2.q ? {
+        OR: [
+          { title: { contains: input2.q, mode: "insensitive" } },
+          { contactName: { contains: input2.q, mode: "insensitive" } },
+          { phone: { contains: input2.q } }
+        ]
+      } : {}
+    ]
   };
   const [rows, total] = await Promise.all([
     db4.pancakeAppointment.findMany({
@@ -320713,26 +321044,16 @@ async function listAppointments(db4, userId, input2) {
     }),
     db4.pancakeAppointment.count({ where })
   ]);
-  return {
-    total,
-    rows: rows.map((row) => ({
-      ...row,
-      startAt: row.startAt.toISOString(),
-      endAt: row.endAt?.toISOString() ?? null,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString()
-    }))
-  };
+  return { total, canWrite: writable, rows: rows.map(appointmentRow) };
 }
 async function createAppointment(db4, userId, input2) {
-  const grants = await shopGrants(db4, userId);
-  orderScope(grants, input2.shopId);
+  await assertShopWriter(db4, userId, input2.shopId);
   const row = await db4.pancakeAppointment.create({
     data: {
       shopId: input2.shopId,
       title: input2.title,
       customerId: input2.customerId ?? null,
-      contactName: input2.contactName ?? null,
+      contactName: await contactNameFor(db4, input2.shopId, input2),
       phone: input2.phone ?? null,
       startAt: new Date(input2.startAt),
       endAt: input2.endAt ? new Date(input2.endAt) : null,
@@ -320744,28 +321065,60 @@ async function createAppointment(db4, userId, input2) {
       createdById: userId
     }
   });
-  return {
-    ...row,
-    startAt: row.startAt.toISOString(),
-    endAt: row.endAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString()
-  };
+  return appointmentRow(row);
+}
+async function updateAppointment(db4, userId, input2) {
+  const grants = await assertShopWriter(db4, userId, input2.shopId);
+  const { count } = await db4.pancakeAppointment.updateMany({
+    where: {
+      id: input2.id,
+      shopId: input2.shopId,
+      ...ownedRecords(grants, input2.shopId, userId, input2.assigneeId)
+    },
+    data: {
+      title: input2.title,
+      note: input2.note,
+      status: input2.status,
+      startAt: input2.startAt ? new Date(input2.startAt) : undefined,
+      endAt: nullableDate(input2.endAt),
+      assigneeId: nullableText2(input2.assigneeId)
+    }
+  });
+  if (!count)
+    throw new PancakeAccessError;
+  return appointmentRow(await db4.pancakeAppointment.findUniqueOrThrow({ where: { id: input2.id } }));
 }
 async function listTickets(db4, userId, input2) {
-  const grants = await shopGrants(db4, userId);
-  orderScope(grants, input2.shopId);
+  const { writable, creator } = await recordAccess(db4, userId, input2);
   const where = {
-    shopId: input2.shopId,
-    status: input2.status || undefined,
-    assigneeId: input2.assigneeId || undefined,
-    customerId: input2.customerId || undefined,
-    OR: input2.q ? [
-      { title: { contains: input2.q, mode: "insensitive" } },
-      { contactName: { contains: input2.q, mode: "insensitive" } },
-      { phone: { contains: input2.q } },
-      { orderId: { contains: input2.q } }
-    ] : undefined
+    AND: [
+      {
+        shopId: input2.shopId,
+        customerId: input2.customerId || undefined,
+        createdAt: dateRange(input2.from, input2.to)
+      },
+      inList(input2.status, (ids) => ({ status: { in: ids } })),
+      inList(input2.priority, (ids) => ({ priority: { in: ids } })),
+      inListOrNone(input2.category, (ids) => ({ category: { in: ids } }), {
+        category: null
+      }),
+      inListOrNone(input2.assigneeId, (ids) => ({ assigneeId: { in: ids } }), {
+        assigneeId: null
+      }),
+      inListOrNone(input2.source, (ids) => ({ source: { in: ids } }), {
+        source: null
+      }),
+      creator,
+      input2.quick === "overdue" ? overdueTicket(new Date) : {},
+      input2.q ? {
+        OR: [
+          { title: { contains: input2.q, mode: "insensitive" } },
+          { contactName: { contains: input2.q, mode: "insensitive" } },
+          { phone: { contains: input2.q } },
+          { orderId: { contains: input2.q } }
+        ]
+      } : {}
+    ]
   };
   const [rows, total] = await Promise.all([
     db4.pancakeTicket.findMany({
@@ -320776,25 +321129,16 @@ async function listTickets(db4, userId, input2) {
     }),
     db4.pancakeTicket.count({ where })
   ]);
-  return {
-    total,
-    rows: rows.map((row) => ({
-      ...row,
-      dueAt: row.dueAt?.toISOString() ?? null,
-      createdAt: row.createdAt.toISOString(),
-      updatedAt: row.updatedAt.toISOString()
-    }))
-  };
+  return { total, canWrite: writable, rows: rows.map(ticketRow) };
 }
 async function createTicket(db4, userId, input2) {
-  const grants = await shopGrants(db4, userId);
-  orderScope(grants, input2.shopId);
+  await assertShopWriter(db4, userId, input2.shopId);
   const row = await db4.pancakeTicket.create({
     data: {
       shopId: input2.shopId,
       title: input2.title,
       customerId: input2.customerId ?? null,
-      contactName: input2.contactName ?? null,
+      contactName: await contactNameFor(db4, input2.shopId, input2),
       phone: input2.phone ?? null,
       email: input2.email ?? null,
       orderId: input2.orderId ?? null,
@@ -320808,16 +321152,30 @@ async function createTicket(db4, userId, input2) {
       createdById: userId
     }
   });
-  return {
-    ...row,
-    dueAt: row.dueAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString()
-  };
+  return ticketRow(row);
+}
+async function updateTicket(db4, userId, input2) {
+  const grants = await assertShopWriter(db4, userId, input2.shopId);
+  const { count } = await db4.pancakeTicket.updateMany({
+    where: {
+      id: input2.id,
+      shopId: input2.shopId,
+      ...ownedRecords(grants, input2.shopId, userId, input2.assigneeId)
+    },
+    data: {
+      status: input2.status,
+      priority: input2.priority,
+      category: nullableText2(input2.category),
+      assigneeId: nullableText2(input2.assigneeId),
+      dueAt: nullableDate(input2.dueAt)
+    }
+  });
+  if (!count)
+    throw new PancakeAccessError;
+  return ticketRow(await db4.pancakeTicket.findUniqueOrThrow({ where: { id: input2.id } }));
 }
 async function createNote(db4, userId, input2) {
-  const grants = await shopGrants(db4, userId);
-  orderScope(grants, input2.shopId);
+  await assertShopWriter(db4, userId, input2.shopId);
   const author = await db4.user.findUnique({
     where: { id: userId },
     select: { name: true }
@@ -320834,6 +321192,187 @@ async function createNote(db4, userId, input2) {
   return {
     ...row,
     createdAt: row.createdAt.toISOString()
+  };
+}
+function percent(part, whole) {
+  return whole ? Number((100 * part / whole).toFixed(1)) : 0;
+}
+function countBy(groups, key) {
+  const counts = new Map;
+  for (const group of groups)
+    counts.set(group[key], (counts.get(group[key]) ?? 0) + group._count._all);
+  return [...counts].map(([value, count]) => ({ value, count })).sort((a3, b2) => b2.count - a3.count);
+}
+async function reportAccess(db4, userId, input2) {
+  orderScope(await shopGrants(db4, userId), input2.shopId);
+}
+async function appointmentReport(db4, userId, input2) {
+  await reportAccess(db4, userId, input2);
+  const where = {
+    shopId: input2.shopId,
+    startAt: dateRange(input2.from, input2.to)
+  };
+  const [groups, sources] = await Promise.all([
+    db4.pancakeAppointment.groupBy({
+      by: ["assigneeId", "status"],
+      where,
+      _count: { _all: true }
+    }),
+    db4.pancakeAppointment.groupBy({
+      by: ["source"],
+      where,
+      _count: { _all: true }
+    })
+  ]);
+  const done = (status) => PANCAKE.appointmentDoneStatuses.includes(status);
+  const cancelled = (status) => PANCAKE.appointmentCancelledStatuses.includes(status);
+  const assignees = new Map;
+  let total = 0;
+  let completed = 0;
+  let cancelledCount = 0;
+  for (const group of groups) {
+    const count = group._count._all;
+    const row = assignees.get(group.assigneeId) ?? {
+      assigneeId: group.assigneeId,
+      assigned: 0,
+      completed: 0,
+      cancelled: 0
+    };
+    row.assigned += count;
+    total += count;
+    if (done(group.status)) {
+      row.completed += count;
+      completed += count;
+    }
+    if (cancelled(group.status)) {
+      row.cancelled += count;
+      cancelledCount += count;
+    }
+    assignees.set(group.assigneeId, row);
+  }
+  return {
+    total,
+    completed,
+    cancelled: cancelledCount,
+    completionRate: percent(completed, total),
+    byStatus: countBy(groups, "status").map(({ value, count }) => ({
+      status: value ?? "",
+      count
+    })),
+    bySource: countBy(sources, "source").map(({ value, count }) => ({
+      source: value,
+      count
+    })),
+    byAssignee: [...assignees.values()].map((row) => ({
+      ...row,
+      completionRate: percent(row.completed, row.assigned)
+    }))
+  };
+}
+var ticketMonthRow = exports_external.object({
+  month: exports_external.string(),
+  total: exports_external.number(),
+  completed: exports_external.number(),
+  completedWithDue: exports_external.number(),
+  onTime: exports_external.number()
+});
+async function ticketReport(db4, userId, input2) {
+  await reportAccess(db4, userId, input2);
+  const now2 = new Date;
+  const where = {
+    shopId: input2.shopId,
+    createdAt: dateRange(input2.from, input2.to)
+  };
+  const doneStatuses = exports_prismaNamespace.join([...PANCAKE.ticketDoneStatuses]);
+  const range = [
+    exports_prismaNamespace.sql`t."shopId" = ${input2.shopId}`,
+    ...input2.from ? [
+      exports_prismaNamespace.sql`t."createdAt" >= (${input2.from}::timestamptz AT TIME ZONE 'UTC')`
+    ] : [],
+    ...input2.to ? [
+      exports_prismaNamespace.sql`t."createdAt" < (${input2.to}::timestamptz AT TIME ZONE 'UTC')`
+    ] : []
+  ];
+  const [statuses, priorities, categories, sources, overdue, monthRows] = await Promise.all([
+    db4.pancakeTicket.groupBy({
+      by: ["status"],
+      where,
+      _count: { _all: true }
+    }),
+    db4.pancakeTicket.groupBy({
+      by: ["priority"],
+      where,
+      _count: { _all: true }
+    }),
+    db4.pancakeTicket.groupBy({
+      by: ["category"],
+      where,
+      _count: { _all: true }
+    }),
+    db4.pancakeTicket.groupBy({
+      by: ["source"],
+      where,
+      _count: { _all: true }
+    }),
+    db4.pancakeTicket.count({ where: { AND: [where, overdueTicket(now2)] } }),
+    db4.$queryRaw`
+				SELECT to_char((t."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${shopTimezone(input2.shopId)}, 'YYYY-MM') AS month,
+					count(*)::float8 AS total,
+					(count(*) FILTER (WHERE t.status IN (${doneStatuses})))::float8 AS "completed",
+					(count(*) FILTER (WHERE t.status IN (${doneStatuses}) AND t."dueAt" IS NOT NULL))::float8 AS "completedWithDue",
+					(count(*) FILTER (WHERE t.status IN (${doneStatuses}) AND t."dueAt" IS NOT NULL AND t."updatedAt" <= t."dueAt"))::float8 AS "onTime"
+				FROM "pancakeTicket" t
+				WHERE ${exports_prismaNamespace.join(range, " AND ")}
+				GROUP BY 1
+				ORDER BY 1`
+  ]);
+  const monthly = exports_external.array(ticketMonthRow).parse(monthRows);
+  const total = statuses.reduce((sum, row) => sum + row._count._all, 0);
+  const completed = statuses.reduce((sum, row) => PANCAKE.ticketDoneStatuses.includes(row.status) ? sum + row._count._all : sum, 0);
+  const withDue = monthly.reduce((sum, row) => sum + row.completedWithDue, 0);
+  const onTime = monthly.reduce((sum, row) => sum + row.onTime, 0);
+  return {
+    total,
+    open: total - completed,
+    overdue,
+    completed,
+    onTimeRate: percent(onTime, withDue),
+    byStatus: countBy(statuses, "status").map(({ value, count }) => ({
+      status: value ?? "",
+      count
+    })),
+    byPriority: countBy(priorities, "priority").map(({ value, count }) => ({
+      priority: value ?? "",
+      count
+    })),
+    byCategory: countBy(categories, "category").map(({ value, count }) => ({
+      category: value,
+      count
+    })),
+    bySource: countBy(sources, "source").map(({ value, count }) => ({
+      source: value,
+      count
+    })),
+    monthly: monthly.map(({ month, total: total2, completed: completed2 }) => ({
+      month,
+      total: total2,
+      completed: completed2
+    }))
+  };
+}
+async function leadReport(db4, userId, input2) {
+  await reportAccess(db4, userId, input2);
+  const statuses = await db4.pancakeLead.groupBy({
+    by: ["status"],
+    where: { shopId: input2.shopId, createdAt: dateRange(input2.from, input2.to) },
+    _count: { _all: true }
+  });
+  return {
+    total: statuses.reduce((sum, row) => sum + row._count._all, 0),
+    byStatus: countBy(statuses, "status").map(({ value, count }) => ({
+      status: value ?? "",
+      count
+    }))
   };
 }
 
@@ -320921,6 +321460,27 @@ class PancakeService {
   }
   createNote(userId, input2) {
     return this.authorize(() => createNote(this.db, userId, input2));
+  }
+  resume(userId, shopId) {
+    return this.authorize(() => resumeShop(this.db, userId, shopId));
+  }
+  updateLead(userId, input2) {
+    return this.authorize(() => updateLead(this.db, userId, input2));
+  }
+  updateAppointment(userId, input2) {
+    return this.authorize(() => updateAppointment(this.db, userId, input2));
+  }
+  updateTicket(userId, input2) {
+    return this.authorize(() => updateTicket(this.db, userId, input2));
+  }
+  appointmentReport(userId, input2) {
+    return this.authorize(() => appointmentReport(this.db, userId, input2));
+  }
+  ticketReport(userId, input2) {
+    return this.authorize(() => ticketReport(this.db, userId, input2));
+  }
+  leadReport(userId, input2) {
+    return this.authorize(() => leadReport(this.db, userId, input2));
   }
   async authorize(action) {
     try {
@@ -321033,6 +321593,27 @@ class PancakeRouter {
   }
   createNote(ctx, input2) {
     return this.pancake.createNote(ctx.user.id, input2);
+  }
+  resume(ctx, input2) {
+    return this.pancake.resume(ctx.user.id, input2.shopId);
+  }
+  updateLead(ctx, input2) {
+    return this.pancake.updateLead(ctx.user.id, input2);
+  }
+  updateAppointment(ctx, input2) {
+    return this.pancake.updateAppointment(ctx.user.id, input2);
+  }
+  updateTicket(ctx, input2) {
+    return this.pancake.updateTicket(ctx.user.id, input2);
+  }
+  appointmentReport(ctx, input2) {
+    return this.pancake.appointmentReport(ctx.user.id, input2);
+  }
+  ticketReport(ctx, input2) {
+    return this.pancake.ticketReport(ctx.user.id, input2);
+  }
+  leadReport(ctx, input2) {
+    return this.pancake.leadReport(ctx.user.id, input2);
   }
 }
 __legacyDecorateClassTS([
@@ -321319,6 +321900,83 @@ __legacyDecorateClassTS([
   ]),
   __legacyMetadataTS("design:returntype", undefined)
 ], PancakeRouter.prototype, "createNote", null);
+__legacyDecorateClassTS([
+  import_nestjs_trpc15.Mutation({ input: shopInput }),
+  __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
+  __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
+  __legacyMetadataTS("design:type", Function),
+  __legacyMetadataTS("design:paramtypes", [
+    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
+    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
+  ]),
+  __legacyMetadataTS("design:returntype", undefined)
+], PancakeRouter.prototype, "resume", null);
+__legacyDecorateClassTS([
+  import_nestjs_trpc15.Mutation({ input: updateLeadInput }),
+  __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
+  __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
+  __legacyMetadataTS("design:type", Function),
+  __legacyMetadataTS("design:paramtypes", [
+    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
+    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
+  ]),
+  __legacyMetadataTS("design:returntype", undefined)
+], PancakeRouter.prototype, "updateLead", null);
+__legacyDecorateClassTS([
+  import_nestjs_trpc15.Mutation({ input: updateAppointmentInput }),
+  __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
+  __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
+  __legacyMetadataTS("design:type", Function),
+  __legacyMetadataTS("design:paramtypes", [
+    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
+    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
+  ]),
+  __legacyMetadataTS("design:returntype", undefined)
+], PancakeRouter.prototype, "updateAppointment", null);
+__legacyDecorateClassTS([
+  import_nestjs_trpc15.Mutation({ input: updateTicketInput }),
+  __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
+  __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
+  __legacyMetadataTS("design:type", Function),
+  __legacyMetadataTS("design:paramtypes", [
+    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
+    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
+  ]),
+  __legacyMetadataTS("design:returntype", undefined)
+], PancakeRouter.prototype, "updateTicket", null);
+__legacyDecorateClassTS([
+  import_nestjs_trpc15.Query({ input: reportInput }),
+  __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
+  __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
+  __legacyMetadataTS("design:type", Function),
+  __legacyMetadataTS("design:paramtypes", [
+    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
+    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
+  ]),
+  __legacyMetadataTS("design:returntype", undefined)
+], PancakeRouter.prototype, "appointmentReport", null);
+__legacyDecorateClassTS([
+  import_nestjs_trpc15.Query({ input: reportInput }),
+  __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
+  __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
+  __legacyMetadataTS("design:type", Function),
+  __legacyMetadataTS("design:paramtypes", [
+    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
+    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
+  ]),
+  __legacyMetadataTS("design:returntype", undefined)
+], PancakeRouter.prototype, "ticketReport", null);
+__legacyDecorateClassTS([
+  import_nestjs_trpc15.Query({ input: reportInput }),
+  __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
+  __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
+  __legacyMetadataTS("design:type", Function),
+  __legacyMetadataTS("design:paramtypes", [
+    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
+    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
+  ]),
+  __legacyMetadataTS("design:returntype", undefined)
+], PancakeRouter.prototype, "leadReport", null);
 PancakeRouter = __legacyDecorateClassTS([
   import_nestjs_trpc15.Router({ alias: "pancake" }),
   import_nestjs_trpc15.UseMiddlewares(AuthMiddleware),

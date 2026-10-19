@@ -18,18 +18,59 @@ export function isRangeKey(value: string | undefined): value is RangeKey {
 	return value !== undefined && value in RANGES;
 }
 
-const DAY_MS = 86_400_000;
-const VN_OFFSET_MS = 7 * 3_600_000;
+function zoneParts(instant: Date, timeZone: string) {
+	const parts = new Intl.DateTimeFormat("en-US", {
+		timeZone,
+		hourCycle: "h23",
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		second: "2-digit",
+	}).formatToParts(instant);
+	const part = (type: string) =>
+		Number(parts.find((item) => item.type === type)?.value ?? 0);
+	return {
+		year: part("year"),
+		month: part("month"),
+		day: part("day"),
+		hour: part("hour"),
+		minute: part("minute"),
+		second: part("second"),
+	};
+}
 
-function vnDay(now: Date): Date {
-	const shifted = new Date(now.getTime() + VN_OFFSET_MS);
-	return new Date(
-		Date.UTC(
-			shifted.getUTCFullYear(),
-			shifted.getUTCMonth(),
-			shifted.getUTCDate(),
-		),
+function zoneOffsetMs(instant: Date, timeZone: string): number {
+	const p = zoneParts(instant, timeZone);
+	const local = Date.UTC(
+		p.year,
+		p.month - 1,
+		p.day,
+		p.hour,
+		p.minute,
+		p.second,
 	);
+	return local - Math.floor(instant.getTime() / 1000) * 1000;
+}
+
+export function zonedMidnight(date: string, timeZone: string): Date {
+	const guess = new Date(`${date}T00:00:00Z`);
+	const first = guess.getTime() - zoneOffsetMs(guess, timeZone);
+	return new Date(guess.getTime() - zoneOffsetMs(new Date(first), timeZone));
+}
+
+export function zonedDateTime(instant: Date, timeZone: string) {
+	const p = zoneParts(instant, timeZone);
+	const pad = (value: number) => String(value).padStart(2, "0");
+	return {
+		date: `${p.year}-${pad(p.month)}-${pad(p.day)}`,
+		time: `${pad(p.hour)}:${pad(p.minute)}`,
+	};
+}
+
+function localDay(now: Date, timeZone: string): Date {
+	return new Date(`${zonedDateTime(now, timeZone).date}T00:00:00Z`);
 }
 
 function iso(day: Date): string {
@@ -37,7 +78,9 @@ function iso(day: Date): string {
 }
 
 function addDays(day: Date, count: number): Date {
-	return new Date(day.getTime() + count * DAY_MS);
+	return new Date(
+		Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + count),
+	);
 }
 
 function startOfWeek(day: Date): Date {
@@ -49,8 +92,12 @@ function startOfMonth(day: Date): Date {
 	return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), 1));
 }
 
-export function rangeBounds(range: RangeKey, now = new Date()): RangeBounds {
-	const today = vnDay(now);
+export function rangeBounds(
+	range: RangeKey,
+	now: Date,
+	timeZone: string,
+): RangeBounds {
+	const today = localDay(now, timeZone);
 	switch (range) {
 		case "today":
 			return { from: iso(today), to: iso(today) };

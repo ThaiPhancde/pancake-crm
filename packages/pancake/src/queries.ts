@@ -3,13 +3,22 @@ import { type Db, Prisma } from "@crm/db";
 import { z } from "zod";
 import {
 	assertShopManager,
+	assertShopWriter,
 	assertWorkspaceAdmin,
+	canWrite,
 	clearShopGrantsCache,
 	orderScope,
 	PancakeAccessError,
+	type ShopGrant,
 	shopGrants,
 } from "./access";
-import { ORDER_VIEWS, PANCAKE, RESOURCES } from "./config";
+import {
+	ORDER_VIEWS,
+	PANCAKE,
+	RESOURCES,
+	shopTimezone,
+	spendSince,
+} from "./config";
 import {
 	type approveEmployeeInput,
 	type createAppointmentInput,
@@ -22,10 +31,152 @@ import {
 	orderWire,
 	productWire,
 	type RecordListInput,
+	type ReportInput,
 	type roleInput,
 	sourceDate,
+	type updateAppointmentInput,
+	type updateLeadInput,
+	type updateTicketInput,
 } from "./contracts";
 import { phoneTail } from "./phone";
+
+export function splitList(raw?: string): string[] {
+	return [
+		...new Set(
+			(raw ?? "")
+				.split(",")
+				.map((value) => value.trim())
+				.filter((value) => value && value !== PANCAKE.anyValue),
+		),
+	];
+}
+
+function inList<T>(raw: string | undefined, clause: (values: string[]) => T) {
+	const values = splitList(raw);
+	return values.length ? clause(values) : {};
+}
+
+function inListOrNone<T, N>(
+	raw: string | undefined,
+	clause: (values: string[]) => T,
+	none: N,
+) {
+	const values = splitList(raw);
+	const named = values.filter((value) => value !== PANCAKE.unassignedValue);
+	const clauses: (T | N)[] = [];
+	if (named.length) clauses.push(clause(named));
+	if (named.length < values.length) clauses.push(none);
+	return clauses.length ? { OR: clauses } : {};
+}
+
+function dateRange(
+	from?: string,
+	to?: string,
+): Prisma.DateTimeFilter | undefined {
+	if (!from && !to) return undefined;
+	return {
+		gte: from ? new Date(from) : undefined,
+		lt: to ? new Date(to) : undefined,
+	};
+}
+
+export function zonedDay(instant: Date, timeZone: string): string {
+	return new Intl.DateTimeFormat("en-CA", {
+		timeZone,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	}).format(instant);
+}
+
+export function zonedMidnight(day: string, timeZone: string): Date {
+	const guess = new Date(`${day}T00:00:00Z`);
+	const parts = new Map(
+		new Intl.DateTimeFormat("en-US", {
+			timeZone,
+			hourCycle: "h23",
+			year: "numeric",
+			month: "numeric",
+			day: "numeric",
+			hour: "numeric",
+			minute: "numeric",
+			second: "numeric",
+		})
+			.formatToParts(guess)
+			.map((part) => [part.type, Number(part.value)]),
+	);
+	const local = Date.UTC(
+		parts.get("year") ?? 0,
+		(parts.get("month") ?? 1) - 1,
+		parts.get("day") ?? 1,
+		parts.get("hour") ?? 0,
+		parts.get("minute") ?? 0,
+		parts.get("second") ?? 0,
+	);
+	return new Date(guess.getTime() - (local - guess.getTime()));
+}
+
+function weekStart(now: Date, timeZone: string): Date {
+	const today = zonedDay(now, timeZone);
+	const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+	const monday = new Date(
+		Date.parse(`${today}T00:00:00Z`) - ((weekday + 6) % 7) * PANCAKE.dayMs,
+	);
+	return zonedMidnight(monday.toISOString().slice(0, 10), timeZone);
+}
+
+export function fillDays<T>(
+	buckets: Map<string, T>,
+	range: { from?: string; to?: string },
+	now: Date,
+	timeZone: string,
+	empty: (day: string) => T,
+): T[] {
+	const known = [...buckets.keys()].sort();
+	const start = range.from
+		? zonedDay(new Date(range.from), timeZone)
+		: known[0];
+	if (!start) return [];
+	const endAt = Math.min(
+		range.to ? Date.parse(range.to) : now.getTime(),
+		now.getTime(),
+	);
+	const end = Date.parse(
+		`${zonedDay(new Date(endAt - 1), timeZone)}T00:00:00Z`,
+	);
+	const days: string[] = [];
+	for (
+		let at = Date.parse(`${start}T00:00:00Z`);
+		at <= end;
+		at += PANCAKE.dayMs
+	)
+		days.push(new Date(at).toISOString().slice(0, 10));
+	return [...new Set([...days, ...known])]
+		.sort()
+		.map((day) => buckets.get(day) ?? empty(day));
+}
+
+function bookedWhere(): Prisma.PancakeOrderWhereInput {
+	return { status: { notIn: [...PANCAKE.bookedExcludedStatuses] } };
+}
+
+function recentSpendWhere(now: Date): Prisma.PancakeOrderWhereInput {
+	return { ...bookedWhere(), sourceCreatedAt: { gte: spendSince(now) } };
+}
+
+async function creatorUserIds(
+	db: Db,
+	shopId: string,
+	raw?: string,
+): Promise<string[]> {
+	const values = splitList(raw);
+	if (!values.length) return [];
+	const members = await db.pancakeShopMember.findMany({
+		where: { shopId, employeeId: { in: values } },
+		select: { userId: true },
+	});
+	return [...new Set([...values, ...members.map((m) => m.userId)])];
+}
 
 function parseEmployeeMeta(raw: Prisma.JsonValue | null) {
 	const parsed = employeeWire.safeParse(raw);
@@ -53,13 +204,9 @@ export function filteredOrders(
 	scope: Prisma.PancakeOrderWhereInput,
 	input: ListInput,
 ): Prisma.PancakeOrderWhereInput {
-	const created: Prisma.DateTimeFilter = {};
-	if (input.from) created.gte = new Date(input.from);
-	if (input.to) created.lt = new Date(input.to);
 	const filters: Prisma.PancakeOrderWhereInput = {
 		status: input.status,
-		sellerId: input.sellerId || undefined,
-		sourceCreatedAt: input.from || input.to ? created : undefined,
+		sourceCreatedAt: dateRange(input.from, input.to),
 		OR: input.q
 			? [
 					{ orderId: { contains: input.q } },
@@ -74,6 +221,9 @@ export function filteredOrders(
 		AND: [
 			scope,
 			filters,
+			inListOrNone(input.sellerId, (ids) => ({ sellerId: { in: ids } }), {
+				sellerId: null,
+			}),
 			input.view === "unassigned"
 				? { sellerId: null }
 				: view.statuses.length
@@ -220,9 +370,7 @@ export async function orderDetail(
 	return {
 		shopId,
 		orderId,
-		canCreateTask: grants.some(
-			(grant) => grant.shopId === shopId && grant.role !== "VIEWER",
-		),
+		canCreateTask: canWrite(grants, shopId),
 		customerId: row.customerId,
 		customerName: row.customerName,
 		shippingHistory: (incoming.partner?.extend_update ?? []).map((event) => ({
@@ -265,15 +413,26 @@ export async function orderDetail(
 	};
 }
 
+function spendAmounts(
+	groups: readonly {
+		currency: string;
+		_sum: { totalPrice: Prisma.Decimal | null };
+	}[],
+) {
+	return groups.map((g) => ({
+		currency: g.currency,
+		amount: g._sum.totalPrice?.toString() ?? "0",
+	}));
+}
+
 export async function listCustomers(db: Db, userId: string, input: ListInput) {
 	const grants = await shopGrants(db, userId);
 	const oScope = orderScope(grants, input.shopId);
 	const selected = input.shopId
 		? grants.filter((grant) => grant.shopId === input.shopId)
 		: grants;
-	const createdFilter: Prisma.DateTimeFilter = {};
-	if (input.from) createdFilter.gte = new Date(input.from);
-	if (input.to) createdFilter.lt = new Date(input.to);
+	const created = dateRange(input.from, input.to);
+	const now = new Date();
 	const where: Prisma.PancakeCustomerWhereInput = {
 		AND: [
 			{
@@ -293,7 +452,11 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 						: { shopId: grant.shopId },
 				),
 			},
-			input.sellerId ? { assignedEmployeeId: input.sellerId } : {},
+			inListOrNone(
+				input.sellerId,
+				(ids) => ({ assignedEmployeeId: { in: ids } }),
+				{ assignedEmployeeId: null },
+			),
 			input.q
 				? {
 						OR: [
@@ -328,16 +491,10 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 			take: input.pageSize,
 		}),
 		db.pancakeCustomer.count({ where }),
-		db.pancakeOrder.aggregate({
-			where: {
-				AND: [
-					oScope,
-					{ status: { in: [3, 16] } },
-					input.from || input.to ? { sourceCreatedAt: createdFilter } : {},
-				],
-			},
+		db.pancakeOrder.groupBy({
+			by: ["currency"],
+			where: { AND: [oScope, recentSpendWhere(now)] },
 			_sum: { totalPrice: true },
-			_count: { _all: true },
 		}),
 		db.pancakeOrder.groupBy({
 			by: ["customerPhone"],
@@ -345,7 +502,7 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 				AND: [
 					oScope,
 					{ customerPhone: { not: null } },
-					input.from || input.to ? { sourceCreatedAt: createdFilter } : {},
+					created ? { sourceCreatedAt: created } : {},
 				],
 			},
 			_count: { _all: true },
@@ -369,34 +526,42 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 		]),
 	);
 	const customerIds = rows.map((r) => r.customerId);
-	const customerOrderGroups = customerIds.length
-		? await db.pancakeOrder.groupBy({
-				by: ["shopId", "customerId"],
-				where: {
-					shopId: { in: selected.map((grant) => grant.shopId) },
-					customerId: { in: customerIds },
-				},
-				_count: { _all: true },
-				_sum: { totalPrice: true },
-			})
-		: [];
-	const orderCountsByCust = new Map(
-		customerOrderGroups.map((g) => [
-			`${g.shopId}:${g.customerId}`,
-			{
-				count: g._count._all,
-				spent: g._sum.totalPrice?.toString() ?? "0",
-			},
-		]),
+	const customerOrders: Prisma.PancakeOrderWhereInput = {
+		AND: [oScope, { customerId: { in: customerIds } }],
+	};
+	const [countGroups, spendGroups] = customerIds.length
+		? await Promise.all([
+				db.pancakeOrder.groupBy({
+					by: ["shopId", "customerId"],
+					where: { AND: [customerOrders, bookedWhere()] },
+					_count: { _all: true },
+				}),
+				db.pancakeOrder.groupBy({
+					by: ["shopId", "customerId", "currency"],
+					where: { AND: [customerOrders, recentSpendWhere(now)] },
+					_sum: { totalPrice: true },
+				}),
+			])
+		: [[], []];
+	const orderCounts = new Map(
+		countGroups.map((g) => [`${g.shopId}:${g.customerId}`, g._count._all]),
 	);
+	const spentByCustomer = new Map<string, ReturnType<typeof spendAmounts>>();
+	for (const g of spendGroups) {
+		const key = `${g.shopId}:${g.customerId}`;
+		spentByCustomer.set(key, [
+			...(spentByCustomer.get(key) ?? []),
+			...spendAmounts([g]),
+		]);
+	}
 	const buyersWithPhone = repeatGroups.length;
 	const returningBuyers = repeatGroups.filter((g) => g._count._all > 1).length;
 	const returningRate = buyersWithPhone
 		? Number(((100 * returningBuyers) / buyersWithPhone).toFixed(1))
 		: 0;
 	const currency = input.shopId
-		? (PANCAKE.shopCurrency.get(input.shopId) ?? "SAR")
-		: "SAR";
+		? (PANCAKE.shopCurrency.get(input.shopId) ?? PANCAKE.defaultCurrency)
+		: PANCAKE.defaultCurrency;
 	return {
 		rows: rows.map(
 			({ assignedEmployeeId, raw, sourceUpdatedAt, fetchedAt, ...row }) => {
@@ -404,18 +569,9 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 				const emp = assignedEmployeeId
 					? staffMap.get(`${row.shopId}:${assignedEmployeeId}`)
 					: undefined;
-				const ordAgg = orderCountsByCust.get(`${row.shopId}:${row.customerId}`);
-				const rawOrderCount = parsed.success
-					? (parsed.data.order_count ?? 0)
-					: 0;
-				const rawSpent = parsed.success
-					? (parsed.data.purchased_amount ?? 0)
-					: 0;
-				const orderCount = Math.max(rawOrderCount, ordAgg?.count ?? 0);
-				const purchasedAmount =
-					Number(ordAgg?.spent ?? 0) > rawSpent
-						? (ordAgg?.spent ?? "0")
-						: String(rawSpent);
+				const key = `${row.shopId}:${row.customerId}`;
+				const orderCount = orderCounts.get(key) ?? 0;
+				const purchasedAmounts = spentByCustomer.get(key) ?? [];
 				const source = parsed.success
 					? (parsed.data.pages_customers?.[0]?.platform ??
 						parsed.data.pages_customers?.[0]?.name ??
@@ -450,7 +606,7 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 					tags,
 					address,
 					orderCount,
-					purchasedAmount,
+					purchasedAmounts,
 					conversationLink,
 					createdAt,
 				};
@@ -459,7 +615,8 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 		total,
 		summary: {
 			newContacts: total,
-			totalSpent: orderStats._sum.totalPrice?.toString() ?? "0",
+			totalSpent: spendAmounts(orderStats),
+			spendWindowDays: PANCAKE.spendWindowDays,
 			returningRate,
 			currency,
 		},
@@ -494,29 +651,45 @@ export async function customerDetail(
 	const personWhere: Prisma.PancakeOrderWhereInput = tail
 		? { OR: [{ customerId }, { customerPhone: { endsWith: tail } }] }
 		: { customerId };
-	const [orders, notes, appointments, tickets] = await Promise.all([
-		db.pancakeOrder.findMany({
-			where: { AND: [scope, { shopId }, personWhere] },
-			select: { ...orderSelect, raw: true },
-			orderBy: [{ sourceCreatedAt: "desc" }, { orderId: "desc" }],
-			take: 50,
-		}),
-		db.pancakeNote.findMany({
-			where: { shopId, customerId },
-			orderBy: { createdAt: "desc" },
-			take: 50,
-		}),
-		db.pancakeAppointment.findMany({
-			where: { shopId, customerId },
-			orderBy: { startAt: "desc" },
-			take: 50,
-		}),
-		db.pancakeTicket.findMany({
-			where: { shopId, customerId },
-			orderBy: { createdAt: "desc" },
-			take: 50,
-		}),
-	]);
+	const personOrders: Prisma.PancakeOrderWhereInput = {
+		AND: [scope, { shopId }, personWhere],
+	};
+	const now = new Date();
+	const [orders, notes, appointments, tickets, statusCounts, recent] =
+		await Promise.all([
+			db.pancakeOrder.findMany({
+				where: personOrders,
+				select: { ...orderSelect, raw: true },
+				orderBy: [{ sourceCreatedAt: "desc" }, { orderId: "desc" }],
+				take: 50,
+			}),
+			db.pancakeNote.findMany({
+				where: { shopId, customerId },
+				orderBy: { createdAt: "desc" },
+				take: 50,
+			}),
+			db.pancakeAppointment.findMany({
+				where: { shopId, customerId },
+				orderBy: { startAt: "desc" },
+				take: 50,
+			}),
+			db.pancakeTicket.findMany({
+				where: { shopId, customerId },
+				orderBy: { createdAt: "desc" },
+				take: 50,
+			}),
+			db.pancakeOrder.groupBy({
+				by: ["status"],
+				where: personOrders,
+				_count: { _all: true },
+			}),
+			db.pancakeOrder.groupBy({
+				by: ["currency"],
+				where: { AND: [personOrders, recentSpendWhere(now)] },
+				_sum: { totalPrice: true },
+				_count: { _all: true },
+			}),
+		]);
 	const orderIds = orders.map((o) => o.orderId);
 	const tasks = orderIds.length
 		? await db.pancakeTask.findMany({
@@ -525,22 +698,19 @@ export async function customerDetail(
 				orderBy: { dueAt: "asc" },
 			})
 		: [];
-	let totalSpent = new Prisma.Decimal(0);
-	let deliveredCount = 0;
-	for (const ord of orders) {
-		if ([3, 16].includes(ord.status)) {
-			deliveredCount += 1;
-			totalSpent = totalSpent.add(ord.totalPrice);
-		}
-	}
-	const rawSpent = parsed.success ? (parsed.data.purchased_amount ?? 0) : 0;
-	const spentStr =
-		totalSpent.toNumber() > rawSpent ? totalSpent.toString() : String(rawSpent);
-	const rawCount = parsed.success ? (parsed.data.order_count ?? 0) : 0;
-	const orderCount = Math.max(orders.length, rawCount);
+	const countStatuses = (statuses: readonly number[], include: boolean) =>
+		statusCounts.reduce(
+			(sum, row) =>
+				statuses.includes(row.status) === include ? sum + row._count._all : sum,
+			0,
+		);
+	const orderCount = countStatuses(PANCAKE.bookedExcludedStatuses, false);
+	const deliveredCount = countStatuses(PANCAKE.receivedStatuses, true);
 	const empMeta = employee ? parseEmployeeMeta(employee.raw) : null;
 	const currency =
-		orders[0]?.currency ?? PANCAKE.shopCurrency.get(shopId) ?? "SAR";
+		orders[0]?.currency ??
+		PANCAKE.shopCurrency.get(shopId) ??
+		PANCAKE.defaultCurrency;
 	return {
 		shopId,
 		customerId: customer.customerId,
@@ -571,9 +741,12 @@ export async function customerDetail(
 			: (customer.sourceUpdatedAt ?? customer.fetchedAt)
 		).toISOString(),
 		updatedAt: (customer.sourceUpdatedAt ?? customer.fetchedAt).toISOString(),
+		canWrite: canWrite(grants, shopId),
 		orderCount,
 		deliveredCount,
-		totalSpent: spentStr,
+		totalSpent: spendAmounts(recent),
+		recentOrderCount: recent.reduce((sum, g) => sum + g._count._all, 0),
+		spendWindowDays: PANCAKE.spendWindowDays,
 		currency,
 		orders: orders.map(({ raw, ...ord }) => {
 			const p = orderWire.safeParse(raw);
@@ -827,26 +1000,126 @@ export async function sellerOptions(db: Db, userId: string, shopId?: string) {
 	}));
 }
 
+const dailyRow = z.object({
+	day: z.string(),
+	orders: z.number(),
+	delivered: z.number(),
+	revenue: z.number(),
+	received: z.number(),
+});
+
+function orderSqlWhere(grants: ShopGrant[], input: ListInput): Prisma.Sql {
+	const selected = input.shopId
+		? grants.filter((grant) => grant.shopId === input.shopId)
+		: grants;
+	const scope = selected.length
+		? Prisma.join(
+				selected.map((grant) =>
+					grant.role === "TELESALE"
+						? Prisma.sql`(o."shopId" = ${grant.shopId} AND o."sellerId" = ${grant.employeeId ?? "__unmapped__"})`
+						: Prisma.sql`o."shopId" = ${grant.shopId}`,
+				),
+				" OR ",
+			)
+		: Prisma.sql`FALSE`;
+	const clauses = [Prisma.sql`(${scope})`];
+	if (input.status !== undefined)
+		clauses.push(Prisma.sql`o.status = ${input.status}`);
+	if (input.from)
+		clauses.push(
+			Prisma.sql`o."sourceCreatedAt" >= (${input.from}::timestamptz AT TIME ZONE 'UTC')`,
+		);
+	if (input.to)
+		clauses.push(
+			Prisma.sql`o."sourceCreatedAt" < (${input.to}::timestamptz AT TIME ZONE 'UTC')`,
+		);
+	const sellers = splitList(input.sellerId);
+	const namedSellers = sellers.filter(
+		(value) => value !== PANCAKE.unassignedValue,
+	);
+	const sellerClauses = [
+		...(namedSellers.length
+			? [Prisma.sql`o."sellerId" IN (${Prisma.join(namedSellers)})`]
+			: []),
+		...(namedSellers.length < sellers.length
+			? [Prisma.sql`o."sellerId" IS NULL`]
+			: []),
+	];
+	if (sellerClauses.length)
+		clauses.push(Prisma.sql`(${Prisma.join(sellerClauses, " OR ")})`);
+	const view = ORDER_VIEWS[input.view];
+	if (input.view === "unassigned")
+		clauses.push(Prisma.sql`o."sellerId" IS NULL`);
+	else if (view.statuses.length)
+		clauses.push(Prisma.sql`o.status IN (${Prisma.join([...view.statuses])})`);
+	if (input.q) {
+		const like = `%${input.q}%`;
+		clauses.push(
+			Prisma.sql`(o."orderId" LIKE ${like} OR o."customerName" ILIKE ${like} OR o."customerPhone" LIKE ${like} OR o."trackingCode" LIKE ${like})`,
+		);
+	}
+	return Prisma.join(clauses, " AND ");
+}
+
+async function dailyOrderSeries(
+	db: Db,
+	grants: ShopGrant[],
+	input: ListInput,
+	now: Date,
+	currency: string,
+) {
+	const received = Prisma.join([...PANCAKE.receivedStatuses]);
+	const excluded = Prisma.join([...PANCAKE.bookedExcludedStatuses]);
+	const timeZone = shopTimezone(input.shopId);
+	const rows = z.array(dailyRow).parse(
+		await db.$queryRaw`
+			SELECT to_char((o."sourceCreatedAt" AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD') AS day,
+				count(*)::float8 AS orders,
+				(count(*) FILTER (WHERE o.status IN (${received})))::float8 AS delivered,
+				COALESCE(sum(o."totalPrice") FILTER (WHERE o.currency = ${currency} AND o.status NOT IN (${excluded})), 0)::float8 AS revenue,
+				COALESCE(sum(o."totalPrice") FILTER (WHERE o.currency = ${currency} AND o.status IN (${received})), 0)::float8 AS received
+			FROM "pancakeOrder" o
+			WHERE ${orderSqlWhere(grants, input)}
+			GROUP BY 1
+			ORDER BY 1`,
+	);
+	return fillDays(
+		new Map(rows.map(({ day, ...row }) => [day, { date: day, ...row }])),
+		input,
+		now,
+		timeZone,
+		(day) => ({ date: day, orders: 0, delivered: 0, revenue: 0, received: 0 }),
+	);
+}
+
+function addAmount(
+	totals: Map<string, Prisma.Decimal>,
+	currency: string,
+	amount: string,
+) {
+	totals.set(
+		currency,
+		(totals.get(currency) ?? new Prisma.Decimal(0)).add(amount),
+	);
+}
+
+function amounts(totals: Map<string, Prisma.Decimal>) {
+	return [...totals].map(([currency, amount]) => ({
+		currency,
+		amount: amount.toString(),
+	}));
+}
+
 export async function dashboardReport(
 	db: Db,
 	userId: string,
 	input: ListInput,
 ) {
 	const grants = await shopGrants(db, userId);
-	const scope = orderScope(grants, input.shopId);
-	const where = filteredOrders(scope, input);
-	const [groups, orderDates, employees] = await Promise.all([
+	orderScope(grants, input.shopId);
+	const now = new Date();
+	const [groups, employees] = await Promise.all([
 		revenueReport(db, userId, input),
-		db.pancakeOrder.findMany({
-			where,
-			select: {
-				sourceCreatedAt: true,
-				status: true,
-				totalPrice: true,
-			},
-			orderBy: { sourceCreatedAt: "asc" },
-			take: 10000,
-		}),
 		db.pancakeEmployee.findMany({
 			where: {
 				shopId: input.shopId ?? { in: grants.map((g) => g.shopId) },
@@ -873,29 +1146,35 @@ export async function dashboardReport(
 			cancelled: number;
 			returned: number;
 			revenue: Prisma.Decimal;
+			received: Prisma.Decimal;
 		}
 	>();
-	const currencies = new Map<string, Prisma.Decimal>();
+	const booked = new Map<string, Prisma.Decimal>();
+	const bookedOrders = new Map<string, number>();
+	const collected = new Map<string, Prisma.Decimal>();
 	let orders = 0;
 	let delivered = 0;
 	let cancelled = 0;
 	let returned = 0;
 	for (const group of groups) {
 		orders += group.orders;
-		const received = [3, 16].includes(group.status);
-		const cancelledStatus = [6, 7].includes(group.status);
-		const returnedStatus = [4, 5, 15].includes(group.status);
-		if (received) {
+		const isReceived = PANCAKE.receivedStatuses.includes(group.status);
+		const isBooked = !PANCAKE.bookedExcludedStatuses.includes(group.status);
+		const isCancelled = PANCAKE.cancelledStatuses.includes(group.status);
+		const isReturned = PANCAKE.returnedStatuses.includes(group.status);
+		if (isReceived) {
 			delivered += group.orders;
-			currencies.set(
+			addAmount(collected, group.currency, group.productValue);
+		}
+		if (isBooked) {
+			addAmount(booked, group.currency, group.productValue);
+			bookedOrders.set(
 				group.currency,
-				(currencies.get(group.currency) ?? new Prisma.Decimal(0)).add(
-					group.productValue,
-				),
+				(bookedOrders.get(group.currency) ?? 0) + group.orders,
 			);
 		}
-		if (cancelledStatus) cancelled += group.orders;
-		if (returnedStatus) returned += group.orders;
+		if (isCancelled) cancelled += group.orders;
+		if (isReturned) returned += group.orders;
 		const key = JSON.stringify([group.shopId, group.sellerId, group.currency]);
 		const row = performance.get(key) ?? {
 			shopId: group.shopId,
@@ -910,48 +1189,47 @@ export async function dashboardReport(
 			cancelled: 0,
 			returned: 0,
 			revenue: new Prisma.Decimal(0),
+			received: new Prisma.Decimal(0),
 		};
 		row.orders += group.orders;
-		if (received) {
+		if (isReceived) {
 			row.delivered += group.orders;
-			row.revenue = row.revenue.add(group.productValue);
+			row.received = row.received.add(group.productValue);
 		}
-		if (cancelledStatus) row.cancelled += group.orders;
-		if (returnedStatus) row.returned += group.orders;
+		if (isBooked) row.revenue = row.revenue.add(group.productValue);
+		if (isCancelled) row.cancelled += group.orders;
+		if (isReturned) row.returned += group.orders;
 		performance.set(key, row);
 	}
-	const dailyMap = new Map<
-		string,
-		{ date: string; orders: number; delivered: number; revenue: number }
-	>();
-	for (const item of orderDates) {
-		const day = item.sourceCreatedAt.toISOString().slice(0, 10);
-		const bucket = dailyMap.get(day) ?? {
-			date: day,
-			orders: 0,
-			delivered: 0,
-			revenue: 0,
-		};
-		bucket.orders += 1;
-		if ([3, 16].includes(item.status)) {
-			bucket.delivered += 1;
-			bucket.revenue += Number(item.totalPrice);
-		}
-		dailyMap.set(day, bucket);
-	}
+	const seriesCurrency =
+		[...booked].sort((a, b) => b[1].comparedTo(a[1]))[0]?.[0] ??
+		PANCAKE.shopCurrency.get(input.shopId ?? "") ??
+		PANCAKE.defaultCurrency;
+	const dailySeries = await dailyOrderSeries(
+		db,
+		grants,
+		input,
+		now,
+		seriesCurrency,
+	);
 	return {
 		orders,
 		delivered,
 		cancelled,
 		returned,
-		revenue: [...currencies].map(([currency, amount]) => ({
+		timezone: shopTimezone(input.shopId),
+		revenue: amounts(booked),
+		receivedRevenue: amounts(collected),
+		averageOrderValue: [...booked].map(([currency, amount]) => ({
 			currency,
-			amount: amount.toString(),
+			amount: amount.div(bookedOrders.get(currency) || 1).toString(),
 		})),
-		dailySeries: [...dailyMap.values()],
+		seriesCurrency,
+		dailySeries,
 		performance: [...performance.values()].map((row) => ({
 			...row,
 			revenue: row.revenue.toString(),
+			received: row.received.toString(),
 			deliveredRate: row.orders
 				? `${((100 * row.delivered) / row.orders).toFixed(1)}%`
 				: "0%",
@@ -993,7 +1271,7 @@ export async function connectionStatus(db: Db, userId: string) {
 	});
 	return shops.map((shop) => ({
 		...shop,
-		currency: PANCAKE.shopCurrency.get(shop.id) ?? "SAR",
+		currency: PANCAKE.shopCurrency.get(shop.id) ?? PANCAKE.defaultCurrency,
 		ordersCount: shop._count.orders,
 		customersCount: shop._count.customers,
 		employeesCount: shop._count.employees,
@@ -1173,6 +1451,15 @@ export async function pauseShop(db: Db, userId: string, shopId: string) {
 	return { paused: true };
 }
 
+export async function resumeShop(db: Db, userId: string, shopId: string) {
+	await assertWorkspaceAdmin(db, userId);
+	await db.pancakeShop.update({
+		where: { id: shopId },
+		data: { enabled: true },
+	});
+	return { paused: false };
+}
+
 export async function membershipOptions(
 	db: Db,
 	userId: string,
@@ -1205,24 +1492,155 @@ export async function membershipOptions(
 	};
 }
 
+const leadFields = z.record(z.string(), z.string()).catch({});
+
+function leadRow<
+	T extends { fields: Prisma.JsonValue; createdAt: Date; updatedAt: Date },
+>(row: T) {
+	return {
+		...row,
+		fields: leadFields.parse(row.fields),
+		createdAt: row.createdAt.toISOString(),
+		updatedAt: row.updatedAt.toISOString(),
+	};
+}
+
+function appointmentRow<
+	T extends {
+		startAt: Date;
+		endAt: Date | null;
+		createdAt: Date;
+		updatedAt: Date;
+	},
+>(row: T) {
+	return {
+		...row,
+		startAt: row.startAt.toISOString(),
+		endAt: row.endAt?.toISOString() ?? null,
+		createdAt: row.createdAt.toISOString(),
+		updatedAt: row.updatedAt.toISOString(),
+	};
+}
+
+function ticketRow<
+	T extends { dueAt: Date | null; createdAt: Date; updatedAt: Date },
+>(row: T) {
+	return {
+		...row,
+		dueAt: row.dueAt?.toISOString() ?? null,
+		createdAt: row.createdAt.toISOString(),
+		updatedAt: row.updatedAt.toISOString(),
+	};
+}
+
+function nullableDate(value: string | null | undefined) {
+	return value === undefined ? undefined : value ? new Date(value) : null;
+}
+
+function nullableText(value: string | null | undefined) {
+	return value === undefined ? undefined : value || null;
+}
+
+async function contactNameFor(
+	db: Db,
+	shopId: string,
+	input: { customerId?: string; contactName?: string },
+) {
+	if (input.contactName || !input.customerId) return input.contactName ?? null;
+	const customer = await db.pancakeCustomer.findUnique({
+		where: { shopId_customerId: { shopId, customerId: input.customerId } },
+		select: { name: true },
+	});
+	return customer?.name ?? null;
+}
+
+function ownedRecords(
+	grants: ShopGrant[],
+	shopId: string,
+	userId: string,
+	assigneeId: string | null | undefined,
+) {
+	const grant = grants.find((item) => item.shopId === shopId);
+	if (grant?.role !== "TELESALE") return {};
+	if (assigneeId && assigneeId !== grant.employeeId)
+		throw new PancakeAccessError();
+	return {
+		OR: [
+			{ createdById: userId },
+			...(grant.employeeId ? [{ assigneeId: grant.employeeId }] : []),
+		],
+	};
+}
+
+function overdueTicket(now: Date): Prisma.PancakeTicketWhereInput {
+	return {
+		dueAt: { lt: now },
+		status: { notIn: [...PANCAKE.ticketDoneStatuses] },
+	};
+}
+
+async function recordAccess(db: Db, userId: string, input: RecordListInput) {
+	const grants = await shopGrants(db, userId);
+	orderScope(grants, input.shopId);
+	const creators = await creatorUserIds(db, input.shopId, input.creatorId);
+	return {
+		grants,
+		writable: canWrite(grants, input.shopId),
+		creator: creators.length ? { createdById: { in: creators } } : {},
+	};
+}
+
 export async function listLeads(
 	db: Db,
 	userId: string,
 	input: RecordListInput,
 ) {
-	const grants = await shopGrants(db, userId);
-	orderScope(grants, input.shopId);
+	const { grants, writable, creator } = await recordAccess(db, userId, input);
+	const now = new Date();
+	const employeeId = grants.find(
+		(grant) => grant.shopId === input.shopId,
+	)?.employeeId;
+	const mine: Prisma.PancakeLeadWhereInput = {
+		OR: [
+			{ createdById: userId },
+			...(employeeId ? [{ assigneeId: employeeId }] : []),
+		],
+	};
+	const quick: Prisma.PancakeLeadWhereInput =
+		input.quick === "mine-new"
+			? { AND: [mine, { status: "new" }] }
+			: input.quick === "mine-week"
+				? {
+						AND: [
+							mine,
+							{
+								createdAt: { gte: weekStart(now, shopTimezone(input.shopId)) },
+							},
+						],
+					}
+				: {};
 	const where: Prisma.PancakeLeadWhereInput = {
-		shopId: input.shopId,
-		status: input.status || undefined,
-		assigneeId: input.assigneeId || undefined,
-		OR: input.q
-			? [
-					{ name: { contains: input.q, mode: "insensitive" } },
-					{ phone: { contains: input.q } },
-					{ email: { contains: input.q, mode: "insensitive" } },
-				]
-			: undefined,
+		AND: [
+			{ shopId: input.shopId, createdAt: dateRange(input.from, input.to) },
+			inList(input.status, (ids) => ({ status: { in: ids } })),
+			inListOrNone(input.assigneeId, (ids) => ({ assigneeId: { in: ids } }), {
+				assigneeId: null,
+			}),
+			inListOrNone(input.source, (ids) => ({ source: { in: ids } }), {
+				source: null,
+			}),
+			creator,
+			quick,
+			input.q
+				? {
+						OR: [
+							{ name: { contains: input.q, mode: "insensitive" } },
+							{ phone: { contains: input.q } },
+							{ email: { contains: input.q, mode: "insensitive" } },
+						],
+					}
+				: {},
+		],
 	};
 	const [rows, total] = await Promise.all([
 		db.pancakeLead.findMany({
@@ -1233,15 +1651,7 @@ export async function listLeads(
 		}),
 		db.pancakeLead.count({ where }),
 	]);
-	return {
-		total,
-		rows: rows.map((row) => ({
-			...row,
-			fields: z.record(z.string(), z.string()).catch({}).parse(row.fields),
-			createdAt: row.createdAt.toISOString(),
-			updatedAt: row.updatedAt.toISOString(),
-		})),
-	};
+	return { total, canWrite: writable, rows: rows.map(leadRow) };
 }
 
 export async function createLead(
@@ -1249,8 +1659,7 @@ export async function createLead(
 	userId: string,
 	input: z.infer<typeof createLeadInput>,
 ) {
-	const grants = await shopGrants(db, userId);
-	orderScope(grants, input.shopId);
+	await assertShopWriter(db, userId, input.shopId);
 	const row = await db.pancakeLead.create({
 		data: {
 			shopId: input.shopId,
@@ -1265,12 +1674,30 @@ export async function createLead(
 			createdById: userId,
 		},
 	});
-	return {
-		...row,
-		fields: z.record(z.string(), z.string()).catch({}).parse(row.fields),
-		createdAt: row.createdAt.toISOString(),
-		updatedAt: row.updatedAt.toISOString(),
-	};
+	return leadRow(row);
+}
+
+export async function updateLead(
+	db: Db,
+	userId: string,
+	input: z.infer<typeof updateLeadInput>,
+) {
+	const grants = await assertShopWriter(db, userId, input.shopId);
+	const { count } = await db.pancakeLead.updateMany({
+		where: {
+			id: input.id,
+			shopId: input.shopId,
+			...ownedRecords(grants, input.shopId, userId, input.assigneeId),
+		},
+		data: {
+			status: input.status,
+			assigneeId: nullableText(input.assigneeId),
+		},
+	});
+	if (!count) throw new PancakeAccessError();
+	return leadRow(
+		await db.pancakeLead.findUniqueOrThrow({ where: { id: input.id } }),
+	);
 }
 
 export async function listAppointments(
@@ -1278,24 +1705,32 @@ export async function listAppointments(
 	userId: string,
 	input: RecordListInput,
 ) {
-	const grants = await shopGrants(db, userId);
-	orderScope(grants, input.shopId);
-	const startFilter: Prisma.DateTimeFilter = {};
-	if (input.from) startFilter.gte = new Date(input.from);
-	if (input.to) startFilter.lt = new Date(input.to);
+	const { writable, creator } = await recordAccess(db, userId, input);
 	const where: Prisma.PancakeAppointmentWhereInput = {
-		shopId: input.shopId,
-		status: input.status || undefined,
-		assigneeId: input.assigneeId || undefined,
-		customerId: input.customerId || undefined,
-		startAt: input.from || input.to ? startFilter : undefined,
-		OR: input.q
-			? [
-					{ title: { contains: input.q, mode: "insensitive" } },
-					{ contactName: { contains: input.q, mode: "insensitive" } },
-					{ phone: { contains: input.q } },
-				]
-			: undefined,
+		AND: [
+			{
+				shopId: input.shopId,
+				customerId: input.customerId || undefined,
+				startAt: dateRange(input.from, input.to),
+			},
+			inList(input.status, (ids) => ({ status: { in: ids } })),
+			inListOrNone(input.assigneeId, (ids) => ({ assigneeId: { in: ids } }), {
+				assigneeId: null,
+			}),
+			inListOrNone(input.source, (ids) => ({ source: { in: ids } }), {
+				source: null,
+			}),
+			creator,
+			input.q
+				? {
+						OR: [
+							{ title: { contains: input.q, mode: "insensitive" } },
+							{ contactName: { contains: input.q, mode: "insensitive" } },
+							{ phone: { contains: input.q } },
+						],
+					}
+				: {},
+		],
 	};
 	const [rows, total] = await Promise.all([
 		db.pancakeAppointment.findMany({
@@ -1306,16 +1741,7 @@ export async function listAppointments(
 		}),
 		db.pancakeAppointment.count({ where }),
 	]);
-	return {
-		total,
-		rows: rows.map((row) => ({
-			...row,
-			startAt: row.startAt.toISOString(),
-			endAt: row.endAt?.toISOString() ?? null,
-			createdAt: row.createdAt.toISOString(),
-			updatedAt: row.updatedAt.toISOString(),
-		})),
-	};
+	return { total, canWrite: writable, rows: rows.map(appointmentRow) };
 }
 
 export async function createAppointment(
@@ -1323,14 +1749,13 @@ export async function createAppointment(
 	userId: string,
 	input: z.infer<typeof createAppointmentInput>,
 ) {
-	const grants = await shopGrants(db, userId);
-	orderScope(grants, input.shopId);
+	await assertShopWriter(db, userId, input.shopId);
 	const row = await db.pancakeAppointment.create({
 		data: {
 			shopId: input.shopId,
 			title: input.title,
 			customerId: input.customerId ?? null,
-			contactName: input.contactName ?? null,
+			contactName: await contactNameFor(db, input.shopId, input),
 			phone: input.phone ?? null,
 			startAt: new Date(input.startAt),
 			endAt: input.endAt ? new Date(input.endAt) : null,
@@ -1342,13 +1767,34 @@ export async function createAppointment(
 			createdById: userId,
 		},
 	});
-	return {
-		...row,
-		startAt: row.startAt.toISOString(),
-		endAt: row.endAt?.toISOString() ?? null,
-		createdAt: row.createdAt.toISOString(),
-		updatedAt: row.updatedAt.toISOString(),
-	};
+	return appointmentRow(row);
+}
+
+export async function updateAppointment(
+	db: Db,
+	userId: string,
+	input: z.infer<typeof updateAppointmentInput>,
+) {
+	const grants = await assertShopWriter(db, userId, input.shopId);
+	const { count } = await db.pancakeAppointment.updateMany({
+		where: {
+			id: input.id,
+			shopId: input.shopId,
+			...ownedRecords(grants, input.shopId, userId, input.assigneeId),
+		},
+		data: {
+			title: input.title,
+			note: input.note,
+			status: input.status,
+			startAt: input.startAt ? new Date(input.startAt) : undefined,
+			endAt: nullableDate(input.endAt),
+			assigneeId: nullableText(input.assigneeId),
+		},
+	});
+	if (!count) throw new PancakeAccessError();
+	return appointmentRow(
+		await db.pancakeAppointment.findUniqueOrThrow({ where: { id: input.id } }),
+	);
 }
 
 export async function listTickets(
@@ -1356,21 +1802,38 @@ export async function listTickets(
 	userId: string,
 	input: RecordListInput,
 ) {
-	const grants = await shopGrants(db, userId);
-	orderScope(grants, input.shopId);
+	const { writable, creator } = await recordAccess(db, userId, input);
 	const where: Prisma.PancakeTicketWhereInput = {
-		shopId: input.shopId,
-		status: input.status || undefined,
-		assigneeId: input.assigneeId || undefined,
-		customerId: input.customerId || undefined,
-		OR: input.q
-			? [
-					{ title: { contains: input.q, mode: "insensitive" } },
-					{ contactName: { contains: input.q, mode: "insensitive" } },
-					{ phone: { contains: input.q } },
-					{ orderId: { contains: input.q } },
-				]
-			: undefined,
+		AND: [
+			{
+				shopId: input.shopId,
+				customerId: input.customerId || undefined,
+				createdAt: dateRange(input.from, input.to),
+			},
+			inList(input.status, (ids) => ({ status: { in: ids } })),
+			inList(input.priority, (ids) => ({ priority: { in: ids } })),
+			inListOrNone(input.category, (ids) => ({ category: { in: ids } }), {
+				category: null,
+			}),
+			inListOrNone(input.assigneeId, (ids) => ({ assigneeId: { in: ids } }), {
+				assigneeId: null,
+			}),
+			inListOrNone(input.source, (ids) => ({ source: { in: ids } }), {
+				source: null,
+			}),
+			creator,
+			input.quick === "overdue" ? overdueTicket(new Date()) : {},
+			input.q
+				? {
+						OR: [
+							{ title: { contains: input.q, mode: "insensitive" } },
+							{ contactName: { contains: input.q, mode: "insensitive" } },
+							{ phone: { contains: input.q } },
+							{ orderId: { contains: input.q } },
+						],
+					}
+				: {},
+		],
 	};
 	const [rows, total] = await Promise.all([
 		db.pancakeTicket.findMany({
@@ -1381,15 +1844,7 @@ export async function listTickets(
 		}),
 		db.pancakeTicket.count({ where }),
 	]);
-	return {
-		total,
-		rows: rows.map((row) => ({
-			...row,
-			dueAt: row.dueAt?.toISOString() ?? null,
-			createdAt: row.createdAt.toISOString(),
-			updatedAt: row.updatedAt.toISOString(),
-		})),
-	};
+	return { total, canWrite: writable, rows: rows.map(ticketRow) };
 }
 
 export async function createTicket(
@@ -1397,14 +1852,13 @@ export async function createTicket(
 	userId: string,
 	input: z.infer<typeof createTicketInput>,
 ) {
-	const grants = await shopGrants(db, userId);
-	orderScope(grants, input.shopId);
+	await assertShopWriter(db, userId, input.shopId);
 	const row = await db.pancakeTicket.create({
 		data: {
 			shopId: input.shopId,
 			title: input.title,
 			customerId: input.customerId ?? null,
-			contactName: input.contactName ?? null,
+			contactName: await contactNameFor(db, input.shopId, input),
 			phone: input.phone ?? null,
 			email: input.email ?? null,
 			orderId: input.orderId ?? null,
@@ -1418,12 +1872,33 @@ export async function createTicket(
 			createdById: userId,
 		},
 	});
-	return {
-		...row,
-		dueAt: row.dueAt?.toISOString() ?? null,
-		createdAt: row.createdAt.toISOString(),
-		updatedAt: row.updatedAt.toISOString(),
-	};
+	return ticketRow(row);
+}
+
+export async function updateTicket(
+	db: Db,
+	userId: string,
+	input: z.infer<typeof updateTicketInput>,
+) {
+	const grants = await assertShopWriter(db, userId, input.shopId);
+	const { count } = await db.pancakeTicket.updateMany({
+		where: {
+			id: input.id,
+			shopId: input.shopId,
+			...ownedRecords(grants, input.shopId, userId, input.assigneeId),
+		},
+		data: {
+			status: input.status,
+			priority: input.priority,
+			category: nullableText(input.category),
+			assigneeId: nullableText(input.assigneeId),
+			dueAt: nullableDate(input.dueAt),
+		},
+	});
+	if (!count) throw new PancakeAccessError();
+	return ticketRow(
+		await db.pancakeTicket.findUniqueOrThrow({ where: { id: input.id } }),
+	);
 }
 
 export async function createNote(
@@ -1431,8 +1906,7 @@ export async function createNote(
 	userId: string,
 	input: z.infer<typeof createNoteInput>,
 ) {
-	const grants = await shopGrants(db, userId);
-	orderScope(grants, input.shopId);
+	await assertShopWriter(db, userId, input.shopId);
 	const author = await db.user.findUnique({
 		where: { id: userId },
 		select: { name: true },
@@ -1449,5 +1923,223 @@ export async function createNote(
 	return {
 		...row,
 		createdAt: row.createdAt.toISOString(),
+	};
+}
+
+function percent(part: number, whole: number): number {
+	return whole ? Number(((100 * part) / whole).toFixed(1)) : 0;
+}
+
+function countBy<K extends string>(
+	groups: ({ _count: { _all: number } } & Record<K, string | null>)[],
+	key: K,
+) {
+	const counts = new Map<string | null, number>();
+	for (const group of groups)
+		counts.set(group[key], (counts.get(group[key]) ?? 0) + group._count._all);
+	return [...counts]
+		.map(([value, count]) => ({ value, count }))
+		.sort((a, b) => b.count - a.count);
+}
+
+async function reportAccess(db: Db, userId: string, input: ReportInput) {
+	orderScope(await shopGrants(db, userId), input.shopId);
+}
+
+export async function appointmentReport(
+	db: Db,
+	userId: string,
+	input: ReportInput,
+) {
+	await reportAccess(db, userId, input);
+	const where: Prisma.PancakeAppointmentWhereInput = {
+		shopId: input.shopId,
+		startAt: dateRange(input.from, input.to),
+	};
+	const [groups, sources] = await Promise.all([
+		db.pancakeAppointment.groupBy({
+			by: ["assigneeId", "status"],
+			where,
+			_count: { _all: true },
+		}),
+		db.pancakeAppointment.groupBy({
+			by: ["source"],
+			where,
+			_count: { _all: true },
+		}),
+	]);
+	const done = (status: string) =>
+		PANCAKE.appointmentDoneStatuses.includes(status);
+	const cancelled = (status: string) =>
+		PANCAKE.appointmentCancelledStatuses.includes(status);
+	const assignees = new Map<
+		string | null,
+		{
+			assigneeId: string | null;
+			assigned: number;
+			completed: number;
+			cancelled: number;
+		}
+	>();
+	let total = 0;
+	let completed = 0;
+	let cancelledCount = 0;
+	for (const group of groups) {
+		const count = group._count._all;
+		const row = assignees.get(group.assigneeId) ?? {
+			assigneeId: group.assigneeId,
+			assigned: 0,
+			completed: 0,
+			cancelled: 0,
+		};
+		row.assigned += count;
+		total += count;
+		if (done(group.status)) {
+			row.completed += count;
+			completed += count;
+		}
+		if (cancelled(group.status)) {
+			row.cancelled += count;
+			cancelledCount += count;
+		}
+		assignees.set(group.assigneeId, row);
+	}
+	return {
+		total,
+		completed,
+		cancelled: cancelledCount,
+		completionRate: percent(completed, total),
+		byStatus: countBy(groups, "status").map(({ value, count }) => ({
+			status: value ?? "",
+			count,
+		})),
+		bySource: countBy(sources, "source").map(({ value, count }) => ({
+			source: value,
+			count,
+		})),
+		byAssignee: [...assignees.values()].map((row) => ({
+			...row,
+			completionRate: percent(row.completed, row.assigned),
+		})),
+	};
+}
+
+const ticketMonthRow = z.object({
+	month: z.string(),
+	total: z.number(),
+	completed: z.number(),
+	completedWithDue: z.number(),
+	onTime: z.number(),
+});
+
+export async function ticketReport(db: Db, userId: string, input: ReportInput) {
+	await reportAccess(db, userId, input);
+	const now = new Date();
+	const where: Prisma.PancakeTicketWhereInput = {
+		shopId: input.shopId,
+		createdAt: dateRange(input.from, input.to),
+	};
+	const doneStatuses = Prisma.join([...PANCAKE.ticketDoneStatuses]);
+	const range = [
+		Prisma.sql`t."shopId" = ${input.shopId}`,
+		...(input.from
+			? [
+					Prisma.sql`t."createdAt" >= (${input.from}::timestamptz AT TIME ZONE 'UTC')`,
+				]
+			: []),
+		...(input.to
+			? [
+					Prisma.sql`t."createdAt" < (${input.to}::timestamptz AT TIME ZONE 'UTC')`,
+				]
+			: []),
+	];
+	const [statuses, priorities, categories, sources, overdue, monthRows] =
+		await Promise.all([
+			db.pancakeTicket.groupBy({
+				by: ["status"],
+				where,
+				_count: { _all: true },
+			}),
+			db.pancakeTicket.groupBy({
+				by: ["priority"],
+				where,
+				_count: { _all: true },
+			}),
+			db.pancakeTicket.groupBy({
+				by: ["category"],
+				where,
+				_count: { _all: true },
+			}),
+			db.pancakeTicket.groupBy({
+				by: ["source"],
+				where,
+				_count: { _all: true },
+			}),
+			db.pancakeTicket.count({ where: { AND: [where, overdueTicket(now)] } }),
+			db.$queryRaw`
+				SELECT to_char((t."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${shopTimezone(input.shopId)}, 'YYYY-MM') AS month,
+					count(*)::float8 AS total,
+					(count(*) FILTER (WHERE t.status IN (${doneStatuses})))::float8 AS "completed",
+					(count(*) FILTER (WHERE t.status IN (${doneStatuses}) AND t."dueAt" IS NOT NULL))::float8 AS "completedWithDue",
+					(count(*) FILTER (WHERE t.status IN (${doneStatuses}) AND t."dueAt" IS NOT NULL AND t."updatedAt" <= t."dueAt"))::float8 AS "onTime"
+				FROM "pancakeTicket" t
+				WHERE ${Prisma.join(range, " AND ")}
+				GROUP BY 1
+				ORDER BY 1`,
+		]);
+	const monthly = z.array(ticketMonthRow).parse(monthRows);
+	const total = statuses.reduce((sum, row) => sum + row._count._all, 0);
+	const completed = statuses.reduce(
+		(sum, row) =>
+			PANCAKE.ticketDoneStatuses.includes(row.status)
+				? sum + row._count._all
+				: sum,
+		0,
+	);
+	const withDue = monthly.reduce((sum, row) => sum + row.completedWithDue, 0);
+	const onTime = monthly.reduce((sum, row) => sum + row.onTime, 0);
+	return {
+		total,
+		open: total - completed,
+		overdue,
+		completed,
+		onTimeRate: percent(onTime, withDue),
+		byStatus: countBy(statuses, "status").map(({ value, count }) => ({
+			status: value ?? "",
+			count,
+		})),
+		byPriority: countBy(priorities, "priority").map(({ value, count }) => ({
+			priority: value ?? "",
+			count,
+		})),
+		byCategory: countBy(categories, "category").map(({ value, count }) => ({
+			category: value,
+			count,
+		})),
+		bySource: countBy(sources, "source").map(({ value, count }) => ({
+			source: value,
+			count,
+		})),
+		monthly: monthly.map(({ month, total, completed }) => ({
+			month,
+			total,
+			completed,
+		})),
+	};
+}
+
+export async function leadReport(db: Db, userId: string, input: ReportInput) {
+	await reportAccess(db, userId, input);
+	const statuses = await db.pancakeLead.groupBy({
+		by: ["status"],
+		where: { shopId: input.shopId, createdAt: dateRange(input.from, input.to) },
+		_count: { _all: true },
+	});
+	return {
+		total: statuses.reduce((sum, row) => sum + row._count._all, 0),
+		byStatus: countBy(statuses, "status").map(({ value, count }) => ({
+			status: value ?? "",
+			count,
+		})),
 	};
 }

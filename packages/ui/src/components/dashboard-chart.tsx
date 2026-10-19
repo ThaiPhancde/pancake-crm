@@ -272,7 +272,11 @@ function AreaTrend({
 						strokeWidth={2}
 						fill={`url(#${gradientId}-${key})`}
 						stackId={stacked ? "stack" : undefined}
-						dot={false}
+						dot={
+							data.length === 1
+								? { r: 3, strokeWidth: 0, fill: `var(--color-${key})` }
+								: false
+						}
 						activeDot={{ r: 3, strokeWidth: 0 }}
 						style={
 							bloom === "off"

@@ -1,6 +1,11 @@
 import type { Db, Prisma } from "@crm/db";
 import { z } from "zod";
-import { orderScope, PancakeAccessError, shopGrants } from "./access";
+import {
+	assertShopWriter,
+	orderScope,
+	PancakeAccessError,
+	shopGrants,
+} from "./access";
 import { listInput } from "./contracts";
 
 export const taskListInput = listInput.safeExtend({
@@ -33,9 +38,9 @@ async function writableOrder(
 	shopId: string,
 	orderId: string,
 ) {
-	const grants = await shopGrants(db, userId);
+	const grants = await assertShopWriter(db, userId, shopId);
 	const grant = grants.find((entry) => entry.shopId === shopId);
-	if (!grant || grant.role === "VIEWER") throw new PancakeAccessError();
+	if (!grant) throw new PancakeAccessError();
 	const order = await db.pancakeOrder.findFirst({
 		where: { AND: [orderScope(grants, shopId), { shopId, orderId }] },
 		select: { sellerId: true },

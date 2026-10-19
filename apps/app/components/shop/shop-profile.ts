@@ -1,3 +1,5 @@
+import { PANCAKE, shopTimezone } from "@crm/pancake/config";
+
 export type ShopProfile = {
 	country: string;
 	countryCode: string;
@@ -9,14 +11,14 @@ export type ShopProfile = {
 	cities: string[];
 };
 
-const PROFILES = new Map<string, ShopProfile>(
+type StaticProfile = Omit<ShopProfile, "currency" | "timezone">;
+
+const PROFILES = new Map<string, StaticProfile>(
 	Object.entries({
 		"1635200759": {
 			country: "United Arab Emirates",
 			countryCode: "AE",
 			flag: "🇦🇪",
-			currency: "AED",
-			timezone: "Asia/Dubai",
 			timezoneLabel: "(GMT +4:00) Abu Dhabi, Dubai",
 			dialCode: "971",
 			cities: [
@@ -32,8 +34,6 @@ const PROFILES = new Map<string, ShopProfile>(
 			country: "Saudi Arabia",
 			countryCode: "SA",
 			flag: "🇸🇦",
-			currency: "SAR",
-			timezone: "Asia/Riyadh",
 			timezoneLabel: "(GMT +3:00) Riyadh",
 			dialCode: "966",
 			cities: ["Riyadh", "Jeddah", "Dammam", "Mecca", "Medina", "Khobar"],
@@ -42,8 +42,6 @@ const PROFILES = new Map<string, ShopProfile>(
 			country: "Kuwait",
 			countryCode: "KW",
 			flag: "🇰🇼",
-			currency: "KWD",
-			timezone: "Asia/Kuwait",
 			timezoneLabel: "(GMT +3:00) Kuwait",
 			dialCode: "965",
 			cities: [
@@ -55,22 +53,25 @@ const PROFILES = new Map<string, ShopProfile>(
 				"Jahra",
 			],
 		},
-	} satisfies Record<string, ShopProfile>),
+	} satisfies Record<string, StaticProfile>),
 );
 
-const FALLBACK: ShopProfile = {
+const FALLBACK: StaticProfile = {
 	country: "Việt Nam",
 	countryCode: "VN",
 	flag: "🇻🇳",
-	currency: "VND",
-	timezone: "Asia/Ho_Chi_Minh",
 	timezoneLabel: "(GMT +7:00) Bangkok, Hanoi, Jakarta",
 	dialCode: "84",
 	cities: [],
 };
 
 export function shopProfile(shopId: string): ShopProfile {
-	return PROFILES.get(shopId) ?? FALLBACK;
+	const profile = PROFILES.get(shopId) ?? FALLBACK;
+	return {
+		...profile,
+		currency: PANCAKE.shopCurrency.get(shopId) ?? "VND",
+		timezone: shopTimezone(shopId),
+	};
 }
 
 export function shopInitial(name: string): string {

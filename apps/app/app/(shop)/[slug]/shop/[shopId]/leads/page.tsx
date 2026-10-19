@@ -2,7 +2,6 @@ import Column from "@carbon/icons-react/es/Column";
 import DataTable from "@carbon/icons-react/es/DataTable";
 import SettingsAdjust from "@carbon/icons-react/es/SettingsAdjust";
 import { Avatar, AvatarFallback, AvatarImage } from "@crm/ui/components/avatar";
-import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
 import { Icon } from "@crm/ui/components/icon";
 import Link from "next/link";
@@ -28,7 +27,13 @@ import {
 import { Dash, ListFooter, ListTable } from "@/components/shop/list-table";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { ShopPage, ShopPageBody, ShopPageHeader } from "@/components/shop/page";
-import { type SearchValues, text, withParams } from "@/components/shop/params";
+import {
+	type SearchValues,
+	shopFilters,
+	text,
+	withParams,
+} from "@/components/shop/params";
+import { RecordQuickEdit } from "@/components/shop/record-quick-edit";
 import { CreateRecordButton } from "@/components/shop/record-sheet";
 import { initials } from "@/lib/initials";
 
@@ -39,6 +44,21 @@ const TONE_BAR = new Map<string, string>([
 	["green", "border-b-[#22c55e]"],
 	["gray", "border-b-[#9ca3af]"],
 ]);
+
+type LeadList = {
+	total: number;
+	canWrite: boolean;
+	rows: {
+		id: string;
+		name: string;
+		phone: string | null;
+		email: string | null;
+		status: string;
+		source: string | null;
+		assigneeId: string | null;
+		createdAt: string;
+	}[];
+};
 
 export default function LeadsPage(props: {
 	params: Promise<ShopRoute>;
@@ -60,17 +80,22 @@ async function Leads({
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const pageNum = Math.max(1, Number(text(values, "page") || "1"));
-	const [sellers, leads] = await Promise.all([
-		ctx.api.sellers.query({ shopId: ctx.shopId }),
-		ctx.api.leads.query({
-			shopId: ctx.shopId,
-			q: text(values, "q"),
-			status: text(values, "status") || undefined,
-			assigneeId: text(values, "assignee") || undefined,
-			page: pageNum,
-			pageSize: 25,
-		}),
-	]);
+	const filter = shopFilters({ ...values, status: undefined }, ctx.shopId);
+	const sellersQuery = ctx.api.sellers.query({ shopId: ctx.shopId });
+	const leads: LeadList = await ctx.api.leads.query({
+		shopId: ctx.shopId,
+		q: text(values, "q"),
+		status: text(values, "status") || undefined,
+		assigneeId: text(values, "assignee") || undefined,
+		creatorId: text(values, "creator") || undefined,
+		source: text(values, "source") || undefined,
+		quick: text(values, "quick") || undefined,
+		from: filter.input.from,
+		to: filter.input.to,
+		page: pageNum,
+		pageSize: 25,
+	});
+	const sellers = await sellersQuery;
 	const staff = sellers.map((seller) => ({
 		value: seller.employeeId,
 		label: seller.name,
@@ -252,6 +277,17 @@ async function Leads({
 													<div className="mt-1 text-muted-foreground text-xs">
 														{lead.phone ?? lead.email ?? "Chưa có SĐT"}
 													</div>
+													<div className="mt-2">
+														<RecordQuickEdit
+															kind="lead"
+															field="status"
+															id={lead.id}
+															shopId={ctx.shopId}
+															value={lead.status}
+															options={LEAD_STATUSES}
+															disabled={!leads.canWrite}
+														/>
+													</div>
 													<div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
 														<span>{formatDate(lead.createdAt)}</span>
 														{assignee ? (
@@ -284,48 +320,38 @@ async function Leads({
 						<ListTable
 							columns={columns}
 							rows={leads.rows.map((lead) => {
-								const assignee = lead.assigneeId
-									? sellerMap.get(lead.assigneeId)
-									: undefined;
-								const statusOpt = LEAD_STATUSES.find(
-									(s) => s.value === lead.status,
-								);
 								return {
 									key: lead.id,
 									cells: [
 										lead.name,
 										lead.phone ?? <Dash />,
 										lead.email ?? <Dash />,
-										assignee ? (
-											<span
-												key="assignee"
-												className="inline-flex items-center gap-1.5"
-											>
-												<Avatar size="xs">
-													{assignee.avatarUrl ? (
-														<AvatarImage
-															src={assignee.avatarUrl}
-															alt={assignee.name}
-														/>
-													) : null}
-													<AvatarFallback>
-														{initials(assignee.name)}
-													</AvatarFallback>
-												</Avatar>
-												<span>{assignee.name}</span>
-											</span>
-										) : (
-											<Dash key="assignee-none" />
-										),
+										<RecordQuickEdit
+											key="assignee"
+											kind="lead"
+											field="assigneeId"
+											id={lead.id}
+											shopId={ctx.shopId}
+											value={lead.assigneeId}
+											options={staff}
+											disabled={!leads.canWrite}
+										/>,
 										<Dash key="bday" />,
 										lead.source ? (
 											<span key="source">{lead.source}</span>
 										) : (
 											<Dash key="source-none" />
 										),
-										<Badge key="status" variant="blue">
-											{statusOpt?.label ?? lead.status}
-										</Badge>,
+										<RecordQuickEdit
+											key="status"
+											kind="lead"
+											field="status"
+											id={lead.id}
+											shopId={ctx.shopId}
+											value={lead.status}
+											options={LEAD_STATUSES}
+											disabled={!leads.canWrite}
+										/>,
 									],
 								};
 							})}
