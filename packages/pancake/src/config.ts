@@ -21,6 +21,7 @@ export const PANCAKE = {
 	recentPageBudget: 20,
 	transactionMs: 600_000,
 	syncLeaseMs: 900_000,
+	workerRestartCode: "WORKER_RESTART",
 	webhookMaxBytes: 1_048_576,
 	webhookMaxAttempts: 8,
 	webhookBatch: 25,
@@ -142,9 +143,9 @@ export const PERMISSION_DEFAULTS = [
 
 export const RESOURCES = [
 	"employees",
-	"customers",
-	"products",
 	"orders",
+	"products",
+	"customers",
 	"returns",
 ] as const;
 export type Resource = (typeof RESOURCES)[number];

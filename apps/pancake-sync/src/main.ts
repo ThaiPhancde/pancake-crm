@@ -21,6 +21,14 @@ async function main() {
 		return;
 	}
 	assertCrmDatabase(process.env.DATABASE_URL ?? "");
+	await db.pancakeSyncRun.updateMany({
+		where: { status: "running" },
+		data: {
+			status: "failed",
+			errorCode: PANCAKE.workerRestartCode,
+			finishedAt: new Date(),
+		},
+	});
 	do {
 		const shops = await db.pancakeShop.findMany({
 			where: {
