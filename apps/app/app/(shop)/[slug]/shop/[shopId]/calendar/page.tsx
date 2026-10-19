@@ -1,6 +1,6 @@
 import Calendar from "@carbon/icons-react/es/Calendar";
 import DataTable from "@carbon/icons-react/es/DataTable";
-import { PANCAKE, shopTimezone } from "@crm/pancake/config";
+import { PANCAKE } from "@crm/pancake/config";
 import { Icon } from "@crm/ui/components/icon";
 import { Suspense } from "react";
 import { PageShellLoading } from "@/components/page-shell";
@@ -60,7 +60,7 @@ async function Appointments({
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const pageNum = Math.max(1, Number(text(values, "page") || "1"));
-	const timeZone = shopTimezone(ctx.shopId);
+	const timeZone = ctx.shop.timezone;
 	const view = text(values, "view") === "table" ? "table" : "calendar";
 	const rawMode = text(values, "mode");
 	const mode = rawMode === "day" || rawMode === "month" ? rawMode : "week";
@@ -71,7 +71,12 @@ async function Appointments({
 	const bounds =
 		view === "calendar"
 			? visibleRange(date, mode, timeZone)
-			: shopFilters({ ...values, status: undefined }, ctx.shopId).input;
+			: shopFilters(
+					{ ...values, status: undefined },
+					ctx.shopId,
+					undefined,
+					ctx.shop.timezone,
+				).input;
 	const appointmentId = text(values, "appointmentId");
 	const recordInput = {
 		shopId: ctx.shopId,

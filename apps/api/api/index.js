@@ -319485,6 +319485,19 @@ var PANCAKE = {
   ]),
   reminderWindowMs: 60 * MINUTE_MS4,
   reminderBatch: 50,
+  reminderSyncMs: 5 * MINUTE_MS4,
+  automationCacheMs: 5000,
+  settingsCacheMs: 30000,
+  automationRunnableTriggers: [
+    "record_created",
+    "record_updated",
+    "converted"
+  ],
+  automationRunnableEntities: [
+    "lead",
+    "appointment",
+    "ticket"
+  ],
   automationStatus: {
     ok: "đã chạy",
     unsupported: "chưa hỗ trợ",
@@ -319504,7 +319517,7 @@ var PANCAKE = {
   savedFilterMax: 10,
   exportMaxRows: 5000,
   searchLimit: 5,
-  bulkMax: 200,
+  bulkMax: 50,
   historyMaxPage: 100,
   leadConvertedStatus: "converted",
   ageBuckets: [18, 25, 35, 45, 55],
@@ -320519,6 +320532,338 @@ function phoneTail(phone, dial) {
   return digits.length >= 7 ? digits : null;
 }
 
+// ../../packages/pancake/src/settings.ts
+init_zod();
+class PancakeSavedFilterLimit extends Error {
+  constructor() {
+    super("SAVED_FILTER_LIMIT");
+  }
+}
+var shopId = exports_external.string().min(1);
+var currency = exports_external.string().regex(/^[A-Z]{3}$/);
+var timezone = exports_external.string().min(1).max(64).refine((value) => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}, "Invalid IANA time zone");
+var settingsFields = exports_external.object({
+  displayName: exports_external.string().trim().max(160).nullable(),
+  currency,
+  timezone,
+  countries: exports_external.array(exports_external.string().regex(/^[A-Z]{2}$/)).max(50),
+  dialCode: exports_external.string().regex(/^\d{1,4}$/).nullable(),
+  showSamePhoneOnConversation: exports_external.boolean(),
+  mergeOrdersByPhone: exports_external.boolean(),
+  customerSources: exports_external.array(exports_external.string().trim().min(1).max(120)).max(100)
+});
+var updateSettingsInput = settingsFields.partial().extend({ shopId });
+var copySettingsInput = exports_external.object({ sourceShopId: shopId, targetShopId: shopId }).refine((v2) => v2.sourceShopId !== v2.targetShopId, "Same shop");
+function defaultSettings(id2) {
+  return {
+    displayName: null,
+    currency: PANCAKE.shopCurrency.get(id2) ?? PANCAKE.defaultCurrency,
+    timezone: shopTimezone(id2),
+    countries: [],
+    dialCode: PANCAKE.shopDialCode.get(id2) ?? null,
+    showSamePhoneOnConversation: false,
+    mergeOrdersByPhone: false,
+    customerSources: []
+  };
+}
+var settingsCache = new Map;
+function forgetSettings(id2) {
+  settingsCache.delete(id2);
+}
+function effectiveSettings(db4, id2) {
+  const hit = settingsCache.get(id2);
+  if (hit && Date.now() - hit.at < PANCAKE.settingsCacheMs)
+    return hit.value;
+  const value = loadSettings(db4, id2).catch((error53) => {
+    settingsCache.delete(id2);
+    throw error53;
+  });
+  settingsCache.set(id2, { at: Date.now(), value });
+  return value;
+}
+async function loadSettings(db4, id2) {
+  const fallback = defaultSettings(id2);
+  const row = await db4.pancakeShopSettings.findUnique({
+    where: { shopId: id2 }
+  });
+  if (!row)
+    return { ...fallback, saved: false, updatedAt: null };
+  return {
+    displayName: row.displayName,
+    currency: row.currency ?? fallback.currency,
+    timezone: row.timezone ?? fallback.timezone,
+    countries: row.countries,
+    dialCode: row.dialCode ?? fallback.dialCode,
+    showSamePhoneOnConversation: row.showSamePhoneOnConversation,
+    mergeOrdersByPhone: row.mergeOrdersByPhone,
+    customerSources: row.customerSources,
+    saved: true,
+    updatedAt: row.updatedAt.toISOString()
+  };
+}
+async function shopTimezoneOf(db4, id2) {
+  if (!id2)
+    return shopTimezone();
+  return (await effectiveSettings(db4, id2)).timezone;
+}
+async function getSettings(db4, userId, id2) {
+  const grants = await assertShopReader(db4, userId, id2);
+  return {
+    shopId: id2,
+    ...await effectiveSettings(db4, id2),
+    canManage: canManage(grants, id2)
+  };
+}
+function changedKeys(patch) {
+  return Object.entries(patch).filter(([, value]) => value !== undefined).map(([key]) => key);
+}
+async function updateSettings(db4, userId, input2) {
+  await assertShopManager(db4, userId, input2.shopId);
+  const { shopId: id2, ...patch } = input2;
+  await db4.$transaction(async (tx) => {
+    await tx.pancakeShopSettings.upsert({
+      where: { shopId: id2 },
+      create: { ...defaultSettings(id2), ...patch, shopId: id2 },
+      update: patch
+    });
+    await writeAudit(tx, {
+      shopId: id2,
+      userId,
+      area: "settings",
+      action: "update",
+      summary: `Cập nhật cài đặt: ${changedKeys(patch).join(", ") || "không đổi"}`
+    });
+  });
+  forgetSettings(id2);
+  return getSettings(db4, userId, id2);
+}
+async function copySettings(db4, userId, input2) {
+  await Promise.all([
+    assertShopManager(db4, userId, input2.sourceShopId),
+    assertShopManager(db4, userId, input2.targetShopId)
+  ]);
+  const { displayName, saved, updatedAt, ...copied } = await effectiveSettings(db4, input2.sourceShopId);
+  await db4.$transaction(async (tx) => {
+    await tx.pancakeShopSettings.upsert({
+      where: { shopId: input2.targetShopId },
+      create: { ...copied, shopId: input2.targetShopId },
+      update: copied
+    });
+    await writeAudit(tx, {
+      shopId: input2.targetShopId,
+      userId,
+      area: "settings",
+      action: "copy",
+      summary: `Sao chép cấu hình từ shop ${input2.sourceShopId}`
+    });
+  });
+  forgetSettings(input2.targetShopId);
+  return getSettings(db4, userId, input2.targetShopId);
+}
+var month = exports_external.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+var revenueTargetsInput = exports_external.object({
+  shopId,
+  year: exports_external.number().int().min(2000).max(2100).optional()
+});
+var setRevenueTargetInput = exports_external.object({
+  shopId,
+  month,
+  currency,
+  amount: exports_external.string().regex(/^\d{1,18}(\.\d{1,4})?$/).nullable()
+});
+async function revenueTargets(db4, userId, input2) {
+  await assertShopReader(db4, userId, input2.shopId);
+  const rows = await db4.pancakeRevenueTarget.findMany({
+    where: {
+      shopId: input2.shopId,
+      month: input2.year ? { startsWith: `${input2.year}-` } : undefined
+    },
+    select: { month: true, currency: true, amount: true },
+    orderBy: [{ month: "asc" }, { currency: "asc" }]
+  });
+  return rows.map((row) => ({ ...row, amount: row.amount.toString() }));
+}
+async function setRevenueTarget(db4, userId, input2) {
+  await assertShopManager(db4, userId, input2.shopId);
+  const key = {
+    shopId_month_currency: {
+      shopId: input2.shopId,
+      month: input2.month,
+      currency: input2.currency
+    }
+  };
+  await db4.$transaction(async (tx) => {
+    if (input2.amount === null)
+      await tx.pancakeRevenueTarget.deleteMany({
+        where: {
+          shopId: input2.shopId,
+          month: input2.month,
+          currency: input2.currency
+        }
+      });
+    else
+      await tx.pancakeRevenueTarget.upsert({
+        where: key,
+        create: {
+          shopId: input2.shopId,
+          month: input2.month,
+          currency: input2.currency,
+          amount: new exports_prismaNamespace.Decimal(input2.amount)
+        },
+        update: { amount: new exports_prismaNamespace.Decimal(input2.amount) }
+      });
+    await writeAudit(tx, {
+      shopId: input2.shopId,
+      userId,
+      area: "settings",
+      action: "revenue_target",
+      summary: input2.amount === null ? `Xóa mục tiêu doanh thu ${input2.month} ${input2.currency}` : `Đặt mục tiêu doanh thu ${input2.month}: ${input2.amount} ${input2.currency}`
+    });
+  });
+  return {
+    month: input2.month,
+    currency: input2.currency,
+    amount: input2.amount
+  };
+}
+var preferenceFields = exports_external.object({
+  disableAppNotifications: exports_external.boolean(),
+  browserNotifications: exports_external.boolean(),
+  sound: exports_external.string().refine((value) => PANCAKE.notificationSounds.includes(value), "Sound")
+});
+var updatePreferenceInput = preferenceFields.partial().extend({ shopId });
+async function getPreferences(db4, userId, id2) {
+  await assertShopReader(db4, userId, id2);
+  const row = await db4.pancakeUserPreference.findUnique({
+    where: { userId_shopId: { userId, shopId: id2 } },
+    select: {
+      disableAppNotifications: true,
+      browserNotifications: true,
+      sound: true
+    }
+  });
+  return {
+    shopId: id2,
+    ...row ?? {
+      disableAppNotifications: false,
+      browserNotifications: false,
+      sound: PANCAKE.defaultSound
+    },
+    sounds: [...PANCAKE.notificationSounds]
+  };
+}
+async function updatePreferences(db4, userId, input2) {
+  await assertShopReader(db4, userId, input2.shopId);
+  const { shopId: id2, ...patch } = input2;
+  await db4.pancakeUserPreference.upsert({
+    where: { userId_shopId: { userId, shopId: id2 } },
+    create: { userId, shopId: id2, ...patch },
+    update: patch
+  });
+  return getPreferences(db4, userId, id2);
+}
+var SAVED_FILTER_PAGES = [
+  "leads",
+  "contacts",
+  "orders",
+  "appointments",
+  "tickets",
+  "products"
+];
+var savedFilterListInput = exports_external.object({
+  shopId,
+  page: exports_external.enum(SAVED_FILTER_PAGES)
+});
+var createSavedFilterInput = savedFilterListInput.extend({
+  name: exports_external.string().trim().min(1).max(80),
+  params: savedFilterParams,
+  isDefault: exports_external.boolean().default(false)
+});
+var savedFilterRefInput = exports_external.object({ shopId, id: exports_external.string().min(1) });
+var setDefaultSavedFilterInput = savedFilterRefInput.extend({
+  isDefault: exports_external.boolean().default(true)
+});
+async function listSavedFilters(db4, userId, input2) {
+  await assertShopReader(db4, userId, input2.shopId);
+  const rows = await db4.pancakeSavedFilter.findMany({
+    where: { userId, shopId: input2.shopId, page: input2.page },
+    select: {
+      id: true,
+      page: true,
+      name: true,
+      params: true,
+      isDefault: true,
+      createdAt: true
+    },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }]
+  });
+  return {
+    max: PANCAKE.savedFilterMax,
+    rows: rows.map((row) => ({
+      ...row,
+      params: parseSavedFilterParams(row.params),
+      createdAt: row.createdAt.toISOString()
+    }))
+  };
+}
+async function createSavedFilter(db4, userId, input2) {
+  await assertShopReader(db4, userId, input2.shopId);
+  return db4.$transaction(async (tx) => {
+    const scope = { userId, shopId: input2.shopId, page: input2.page };
+    if (await tx.pancakeSavedFilter.count({ where: scope }) >= PANCAKE.savedFilterMax)
+      throw new PancakeSavedFilterLimit;
+    if (input2.isDefault)
+      await tx.pancakeSavedFilter.updateMany({
+        where: scope,
+        data: { isDefault: false }
+      });
+    return tx.pancakeSavedFilter.create({
+      data: {
+        ...scope,
+        name: input2.name,
+        params: input2.params,
+        isDefault: input2.isDefault
+      },
+      select: { id: true }
+    });
+  });
+}
+async function ownFilter(db4, userId, shop, id2) {
+  const row = await db4.pancakeSavedFilter.findFirst({
+    where: { id: id2, userId, shopId: shop },
+    select: { id: true, page: true }
+  });
+  if (!row)
+    throw new PancakeAccessError;
+  return row;
+}
+async function deleteSavedFilter(db4, userId, input2) {
+  const row = await ownFilter(db4, userId, input2.shopId, input2.id);
+  await db4.pancakeSavedFilter.delete({ where: { id: row.id } });
+  return { id: row.id };
+}
+async function setDefaultSavedFilter(db4, userId, input2) {
+  const row = await ownFilter(db4, userId, input2.shopId, input2.id);
+  await db4.$transaction([
+    db4.pancakeSavedFilter.updateMany({
+      where: { userId, shopId: input2.shopId, page: row.page },
+      data: { isDefault: false }
+    }),
+    db4.pancakeSavedFilter.update({
+      where: { id: row.id },
+      data: { isDefault: input2.isDefault }
+    })
+  ]);
+  return { id: row.id, isDefault: input2.isDefault };
+}
+
 // ../../packages/pancake/src/queries.ts
 function splitList(raw4) {
   return [
@@ -320612,12 +320957,12 @@ function bookedWhere() {
 function recentSpendWhere(now2) {
   return { ...bookedWhere(), sourceCreatedAt: { gte: spendSince(now2) } };
 }
-async function creatorUserIds(db4, shopId, raw4) {
+async function creatorUserIds(db4, shopId2, raw4) {
   const values = splitList(raw4);
   if (!values.length)
     return [];
   const members = await db4.pancakeShopMember.findMany({
-    where: { shopId, employeeId: { in: values } },
+    where: { shopId: shopId2, employeeId: { in: values } },
     select: { userId: true }
   });
   return [...new Set([...values, ...members.map((m3) => m3.userId)])];
@@ -320741,18 +321086,18 @@ async function listOrders(db4, userId, input2) {
     total
   };
 }
-async function orderDetail(db4, userId, shopId, orderId) {
+async function orderDetail(db4, userId, shopId2, orderId) {
   const grants = await shopGrants(db4, userId);
-  const scope = orderScope(grants, shopId);
+  const scope = orderScope(grants, shopId2);
   const row = await db4.pancakeOrder.findFirst({
-    where: { AND: [scope, { shopId, orderId }] },
+    where: { AND: [scope, { shopId: shopId2, orderId }] },
     include: { history: { orderBy: [{ occurredAt: "asc" }, { id: "asc" }] } }
   });
   if (!row)
     throw new PancakeAccessError;
   const incoming = orderWire.parse(row.raw);
   const returns = await db4.pancakeReturn.findMany({
-    where: { shopId, orderId },
+    where: { shopId: shopId2, orderId },
     select: {
       returnId: true,
       status: true,
@@ -320762,14 +321107,14 @@ async function orderDetail(db4, userId, shopId, orderId) {
   });
   const actorIds = row.history.flatMap((event) => event.actorId ? [event.actorId] : []);
   const actors = await db4.pancakeEmployee.findMany({
-    where: { shopId, employeeId: { in: actorIds } },
+    where: { shopId: shopId2, employeeId: { in: actorIds } },
     select: { employeeId: true, name: true }
   });
   const actorNames = new Map(actors.map((a3) => [a3.employeeId, a3.name]));
   return {
-    shopId,
+    shopId: shopId2,
     orderId,
-    canCreateTask: canWrite(grants, shopId),
+    canCreateTask: canWrite(grants, shopId2),
     customerId: row.customerId,
     customerName: row.customerName,
     shippingHistory: (incoming.partner?.extend_update ?? []).map((event) => ({
@@ -320811,9 +321156,9 @@ function spendAmounts(groups) {
     amount: g2._sum.totalPrice?.toString() ?? "0"
   }));
 }
-function customerScope(grants, shopId) {
-  orderScope(grants, shopId);
-  const selected = shopId ? grants.filter((grant) => grant.shopId === shopId) : grants;
+function customerScope(grants, shopId2) {
+  orderScope(grants, shopId2);
+  const selected = shopId2 ? grants.filter((grant) => grant.shopId === shopId2) : grants;
   return {
     OR: selected.map((grant) => grant.role === "TELESALE" ? {
       shopId: grant.shopId,
@@ -320928,7 +321273,7 @@ async function listCustomers(db4, userId, input2) {
   const buyersWithPhone = repeatGroups.length;
   const returningBuyers = repeatGroups.filter((g2) => g2._count._all > 1).length;
   const returningRate = buyersWithPhone ? Number((100 * returningBuyers / buyersWithPhone).toFixed(1)) : 0;
-  const currency = input2.shopId ? PANCAKE.shopCurrency.get(input2.shopId) ?? PANCAKE.defaultCurrency : PANCAKE.defaultCurrency;
+  const currency2 = input2.shopId ? PANCAKE.shopCurrency.get(input2.shopId) ?? PANCAKE.defaultCurrency : PANCAKE.defaultCurrency;
   return {
     rows: rows.map(({ assignedEmployeeId, raw: raw4, sourceUpdatedAt, fetchedAt, ...row }) => {
       const parsed = customerWire.safeParse(raw4);
@@ -320965,15 +321310,15 @@ async function listCustomers(db4, userId, input2) {
       totalSpent: spendAmounts(orderStats),
       spendWindowDays: PANCAKE.spendWindowDays,
       returningRate,
-      currency
+      currency: currency2
     }
   };
 }
-async function customerDetail(db4, userId, shopId, customerId) {
+async function customerDetail(db4, userId, shopId2, customerId) {
   const grants = await shopGrants(db4, userId);
-  const scope = orderScope(grants, shopId);
+  const scope = orderScope(grants, shopId2);
   const customer = await db4.pancakeCustomer.findUnique({
-    where: { shopId_customerId: { shopId, customerId } }
+    where: { shopId_customerId: { shopId: shopId2, customerId } }
   });
   if (!customer)
     throw new PancakeAccessError;
@@ -320981,16 +321326,16 @@ async function customerDetail(db4, userId, shopId, customerId) {
   const employee = customer.assignedEmployeeId ? await db4.pancakeEmployee.findUnique({
     where: {
       shopId_employeeId: {
-        shopId,
+        shopId: shopId2,
         employeeId: customer.assignedEmployeeId
       }
     },
     select: { employeeId: true, name: true, raw: true }
   }) : null;
-  const tail = phoneTail(customer.phone, PANCAKE.shopDialCode.get(shopId));
+  const tail = phoneTail(customer.phone, PANCAKE.shopDialCode.get(shopId2));
   const personWhere = tail ? { OR: [{ customerId }, { customerPhone: { endsWith: tail } }] } : { customerId };
   const personOrders = {
-    AND: [scope, { shopId }, personWhere]
+    AND: [scope, { shopId: shopId2 }, personWhere]
   };
   const now2 = new Date;
   const [orders, notes, appointments, tickets, statusCounts, recent] = await Promise.all([
@@ -321001,17 +321346,17 @@ async function customerDetail(db4, userId, shopId, customerId) {
       take: 50
     }),
     db4.pancakeNote.findMany({
-      where: { shopId, customerId },
+      where: { shopId: shopId2, customerId },
       orderBy: { createdAt: "desc" },
       take: 50
     }),
     db4.pancakeAppointment.findMany({
-      where: { shopId, customerId },
+      where: { shopId: shopId2, customerId },
       orderBy: { startAt: "desc" },
       take: 50
     }),
     db4.pancakeTicket.findMany({
-      where: { shopId, customerId },
+      where: { shopId: shopId2, customerId },
       orderBy: { createdAt: "desc" },
       take: 50
     }),
@@ -321029,7 +321374,7 @@ async function customerDetail(db4, userId, shopId, customerId) {
   ]);
   const orderIds = orders.map((o3) => o3.orderId);
   const tasks = orderIds.length ? await db4.pancakeTask.findMany({
-    where: { shopId, orderId: { in: orderIds } },
+    where: { shopId: shopId2, orderId: { in: orderIds } },
     include: { assignee: { select: { id: true, name: true } } },
     orderBy: { dueAt: "asc" }
   }) : [];
@@ -321037,9 +321382,9 @@ async function customerDetail(db4, userId, shopId, customerId) {
   const orderCount = countStatuses(PANCAKE.bookedExcludedStatuses, false);
   const deliveredCount = countStatuses(PANCAKE.receivedStatuses, true);
   const empMeta = employee ? parseEmployeeMeta(employee.raw) : null;
-  const currency = orders[0]?.currency ?? PANCAKE.shopCurrency.get(shopId) ?? PANCAKE.defaultCurrency;
+  const currency2 = orders[0]?.currency ?? PANCAKE.shopCurrency.get(shopId2) ?? PANCAKE.defaultCurrency;
   return {
-    shopId,
+    shopId: shopId2,
     customerId: customer.customerId,
     name: customer.name,
     phone: customer.phone,
@@ -321055,13 +321400,13 @@ async function customerDetail(db4, userId, shopId, customerId) {
     conversationLink: parsed.success ? parsed.data.conversation_link ?? null : null,
     createdAt: (parsed.success && parsed.data.inserted_at ? sourceDate(parsed.data.inserted_at) : customer.sourceUpdatedAt ?? customer.fetchedAt).toISOString(),
     updatedAt: (customer.sourceUpdatedAt ?? customer.fetchedAt).toISOString(),
-    canWrite: canWrite(grants, shopId),
+    canWrite: canWrite(grants, shopId2),
     orderCount,
     deliveredCount,
     totalSpent: spendAmounts(recent),
     recentOrderCount: recent.reduce((sum, g2) => sum + g2._count._all, 0),
     spendWindowDays: PANCAKE.spendWindowDays,
-    currency,
+    currency: currency2,
     orders: orders.map(({ raw: raw4, ...ord }) => {
       const p2 = orderWire.safeParse(raw4);
       return {
@@ -321098,21 +321443,21 @@ async function customerDetail(db4, userId, shopId, customerId) {
     }))
   };
 }
-async function customerPurchases(db4, userId, shopId, customerId, input2) {
+async function customerPurchases(db4, userId, shopId2, customerId, input2) {
   const grants = await shopGrants(db4, userId);
-  const scope = orderScope(grants, shopId);
-  const grant = grants.find((item) => item.shopId === shopId);
+  const scope = orderScope(grants, shopId2);
+  const grant = grants.find((item) => item.shopId === shopId2);
   const customer = await db4.pancakeCustomer.findUnique({
-    where: { shopId_customerId: { shopId, customerId } },
+    where: { shopId_customerId: { shopId: shopId2, customerId } },
     select: { name: true, phone: true, assignedEmployeeId: true }
   });
   if (!customer)
     throw new PancakeAccessError;
   if (grant?.role === "TELESALE" && customer.assignedEmployeeId !== grant.employeeId && !await db4.pancakeOrder.count({ where: { AND: [scope, { customerId }] } }))
     throw new PancakeAccessError;
-  const tail = phoneTail(customer.phone, PANCAKE.shopDialCode.get(shopId));
+  const tail = phoneTail(customer.phone, PANCAKE.shopDialCode.get(shopId2));
   const person = tail ? { customerPhone: { endsWith: tail } } : { customerId };
-  const where = filteredOrders({ AND: [scope, person] }, { ...input2, shopId });
+  const where = filteredOrders({ AND: [scope, person] }, { ...input2, shopId: shopId2 });
   const [rows, total] = await Promise.all([
     db4.pancakeOrder.findMany({
       where,
@@ -321244,12 +321589,12 @@ async function operationsOverview(db4, userId, input2) {
     }))
   };
 }
-async function sellerOptions(db4, userId, shopId) {
+async function sellerOptions(db4, userId, shopId2) {
   const grants = await shopGrants(db4, userId);
-  orderScope(grants, shopId);
+  orderScope(grants, shopId2);
   const rows = await db4.pancakeEmployee.findMany({
     where: {
-      OR: grants.filter((grant) => !shopId || grant.shopId === shopId).map((grant) => ({
+      OR: grants.filter((grant) => !shopId2 || grant.shopId === shopId2).map((grant) => ({
         shopId: grant.shopId,
         employeeId: grant.role === "TELESALE" ? grant.employeeId ?? "__unmapped__" : undefined
       }))
@@ -321304,28 +321649,28 @@ function orderSqlWhere(grants, input2) {
   }
   return exports_prismaNamespace.join(clauses, " AND ");
 }
-async function dailyOrderSeries(db4, grants, input2, now2, currency) {
+async function dailyOrderSeries(db4, grants, input2, now2, currency2) {
   const received = exports_prismaNamespace.join([...PANCAKE.receivedStatuses]);
   const excluded = exports_prismaNamespace.join([...PANCAKE.bookedExcludedStatuses]);
-  const timeZone = shopTimezone(input2.shopId);
+  const timeZone = await shopTimezoneOf(db4, input2.shopId);
   const rows = exports_external.array(dailyRow).parse(await db4.$queryRaw`
 			SELECT to_char((o."sourceCreatedAt" AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD') AS day,
 				count(*)::float8 AS orders,
 				(count(*) FILTER (WHERE o.status IN (${received})))::float8 AS delivered,
-				COALESCE(sum(o."totalPrice") FILTER (WHERE o.currency = ${currency} AND o.status NOT IN (${excluded})), 0)::float8 AS revenue,
-				COALESCE(sum(o."totalPrice") FILTER (WHERE o.currency = ${currency} AND o.status IN (${received})), 0)::float8 AS received
+				COALESCE(sum(o."totalPrice") FILTER (WHERE o.currency = ${currency2} AND o.status NOT IN (${excluded})), 0)::float8 AS revenue,
+				COALESCE(sum(o."totalPrice") FILTER (WHERE o.currency = ${currency2} AND o.status IN (${received})), 0)::float8 AS received
 			FROM "pancakeOrder" o
 			WHERE ${orderSqlWhere(grants, input2)}
 			GROUP BY 1
 			ORDER BY 1`);
   return fillDays(new Map(rows.map(({ day: day2, ...row }) => [day2, { date: day2, ...row }])), input2, now2, timeZone, (day2) => ({ date: day2, orders: 0, delivered: 0, revenue: 0, received: 0 }));
 }
-function addAmount(totals, currency, amount) {
-  totals.set(currency, (totals.get(currency) ?? new exports_prismaNamespace.Decimal(0)).add(amount));
+function addAmount(totals, currency2, amount) {
+  totals.set(currency2, (totals.get(currency2) ?? new exports_prismaNamespace.Decimal(0)).add(amount));
 }
 function amounts(totals) {
-  return [...totals].map(([currency, amount]) => ({
-    currency,
+  return [...totals].map(([currency2, amount]) => ({
+    currency: currency2,
     amount: amount.toString()
   }));
 }
@@ -321415,12 +321760,12 @@ async function dashboardReport(db4, userId, input2) {
       revenue: into.revenue + row.revenue,
       received: into.received + row.received
     })),
-    timezone: shopTimezone(input2.shopId),
+    timezone: await shopTimezoneOf(db4, input2.shopId),
     revenue: amounts(booked),
     receivedRevenue: amounts(collected),
-    averageOrderValue: [...booked].map(([currency, amount]) => ({
-      currency,
-      amount: amount.div(bookedOrders.get(currency) || 1).toString()
+    averageOrderValue: [...booked].map(([currency2, amount]) => ({
+      currency: currency2,
+      amount: amount.div(bookedOrders.get(currency2) || 1).toString()
     })),
     seriesCurrency,
     dailySeries,
@@ -321464,9 +321809,11 @@ async function connectionStatus(db4, userId) {
     },
     orderBy: { name: "asc" }
   });
+  const settings = new Map(await Promise.all(shops.map(async (shop) => [shop.id, await effectiveSettings(db4, shop.id)])));
   return shops.map((shop) => ({
     ...shop,
-    currency: PANCAKE.shopCurrency.get(shop.id) ?? PANCAKE.defaultCurrency,
+    currency: settings.get(shop.id)?.currency ?? PANCAKE.defaultCurrency,
+    timezone: settings.get(shop.id)?.timezone ?? PANCAKE.timezone,
     ordersCount: shop._count.orders,
     customersCount: shop._count.customers,
     employeesCount: shop._count.employees,
@@ -321600,11 +321947,11 @@ async function approveEmployee(db4, userId, input2) {
   });
   return result;
 }
-async function approveAllEmployees(db4, userId, shopId) {
-  await assertShopManager(db4, userId, shopId);
+async function approveAllEmployees(db4, userId, shopId2) {
+  await assertShopManager(db4, userId, shopId2);
   const [employees, members] = await Promise.all([
-    db4.pancakeEmployee.findMany({ where: { shopId } }),
-    db4.pancakeShopMember.findMany({ where: { shopId } })
+    db4.pancakeEmployee.findMany({ where: { shopId: shopId2 } }),
+    db4.pancakeShopMember.findMany({ where: { shopId: shopId2 } })
   ]);
   const mappedIds = new Set(members.flatMap((m3) => m3.employeeId ? [m3.employeeId] : []));
   let approved = 0;
@@ -321614,7 +321961,7 @@ async function approveAllEmployees(db4, userId, shopId) {
     const meta3 = parseEmployeeMeta(emp.raw);
     const isManager = meta3.roleCode === "1" || meta3.roleCode === "2";
     await approveEmployee(db4, userId, {
-      shopId,
+      shopId: shopId2,
       employeeId: emp.employeeId,
       role: isManager ? "MANAGER" : "TELESALE"
     });
@@ -321622,24 +321969,24 @@ async function approveAllEmployees(db4, userId, shopId) {
   }
   return { approved };
 }
-async function pauseShop(db4, userId, shopId) {
+async function pauseShop(db4, userId, shopId2) {
   await assertWorkspaceAdmin(db4, userId);
   await db4.pancakeShop.update({
-    where: { id: shopId },
+    where: { id: shopId2 },
     data: { enabled: false }
   });
   return { paused: true };
 }
-async function resumeShop(db4, userId, shopId) {
+async function resumeShop(db4, userId, shopId2) {
   await assertWorkspaceAdmin(db4, userId);
   await db4.pancakeShop.update({
-    where: { id: shopId },
+    where: { id: shopId2 },
     data: { enabled: true }
   });
   return { paused: false };
 }
-async function membershipOptions(db4, userId, shopId) {
-  await assertShopManager(db4, userId, shopId);
+async function membershipOptions(db4, userId, shopId2) {
+  await assertShopManager(db4, userId, shopId2);
   const [users, employees, members] = await Promise.all([
     db4.user.findMany({
       where: { members: { some: { organizationId: "workspace" } } },
@@ -321647,12 +321994,12 @@ async function membershipOptions(db4, userId, shopId) {
       orderBy: { name: "asc" }
     }),
     db4.pancakeEmployee.findMany({
-      where: { shopId },
+      where: { shopId: shopId2 },
       select: { employeeId: true, name: true, email: true, raw: true },
       orderBy: { name: "asc" }
     }),
     db4.pancakeShopMember.findMany({
-      where: { shopId },
+      where: { shopId: shopId2 },
       select: { userId: true, role: true, employeeId: true }
     })
   ]);
@@ -321697,17 +322044,17 @@ function nullableDate(value) {
 function nullableText2(value) {
   return value === undefined ? undefined : value || null;
 }
-async function contactNameFor(db4, shopId, input2) {
+async function contactNameFor(db4, shopId2, input2) {
   if (input2.contactName || !input2.customerId)
     return input2.contactName ?? null;
   const customer = await db4.pancakeCustomer.findUnique({
-    where: { shopId_customerId: { shopId, customerId: input2.customerId } },
+    where: { shopId_customerId: { shopId: shopId2, customerId: input2.customerId } },
     select: { name: true }
   });
   return customer?.name ?? null;
 }
-function ownedRecords(grants, shopId, userId, assigneeId) {
-  const grant = grants.find((item) => item.shopId === shopId);
+function ownedRecords(grants, shopId2, userId, assigneeId) {
+  const grant = grants.find((item) => item.shopId === shopId2);
   if (grant?.role !== "TELESALE")
     return {};
   if (assigneeId && assigneeId !== grant.employeeId)
@@ -321749,7 +322096,9 @@ async function listLeads(db4, userId, input2) {
     AND: [
       mine,
       {
-        createdAt: { gte: weekStart(now2, shopTimezone(input2.shopId)) }
+        createdAt: {
+          gte: weekStart(now2, await shopTimezoneOf(db4, input2.shopId))
+        }
       }
     ]
   } : {};
@@ -322092,6 +322441,7 @@ var ticketMonthRow = exports_external.object({
 async function ticketReport(db4, userId, input2) {
   await reportAccess(db4, userId, input2);
   const now2 = new Date;
+  const timeZone = await shopTimezoneOf(db4, input2.shopId);
   const where = {
     shopId: input2.shopId,
     createdAt: dateRange(input2.from, input2.to)
@@ -322129,7 +322479,7 @@ async function ticketReport(db4, userId, input2) {
     }),
     db4.pancakeTicket.count({ where: { AND: [where, overdueTicket(now2)] } }),
     db4.$queryRaw`
-				SELECT to_char((t."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${shopTimezone(input2.shopId)}, 'YYYY-MM') AS month,
+				SELECT to_char((t."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM') AS month,
 					count(*)::float8 AS total,
 					(count(*) FILTER (WHERE t.status IN (${doneStatuses})))::float8 AS "completed",
 					(count(*) FILTER (WHERE t.status IN (${doneStatuses}) AND t."dueAt" IS NOT NULL))::float8 AS "completedWithDue",
@@ -322166,8 +322516,8 @@ async function ticketReport(db4, userId, input2) {
       source: value,
       count
     })),
-    monthly: monthly.map(({ month, total: total2, completed: completed2 }) => ({
-      month,
+    monthly: monthly.map(({ month: month2, total: total2, completed: completed2 }) => ({
+      month: month2,
       total: total2,
       completed: completed2
     }))
@@ -322204,9 +322554,9 @@ var exportInput = exports_external.union([listExport, recordExport]);
 function isRecordExport(input2) {
   return recordExport.shape.kind.safeParse(input2.kind).success;
 }
-async function employeeNames(db4, shopId) {
+async function employeeNames(db4, shopId2) {
   const rows = await db4.pancakeEmployee.findMany({
-    where: { shopId },
+    where: { shopId: shopId2 },
     select: { employeeId: true, name: true }
   });
   const names = new Map(rows.map((row) => [row.employeeId, row.name]));
@@ -322445,14 +322795,14 @@ var searchInput = exports_external.object({
 });
 async function globalSearch(db4, userId, input2) {
   const grants = await assertShopReader(db4, userId, input2.shopId);
-  const { q: q2, shopId } = input2;
+  const { q: q2, shopId: shopId2 } = input2;
   const take = PANCAKE.searchLimit;
   const text2 = { contains: q2, mode: "insensitive" };
   const [customers, orders, leads, tickets] = await Promise.all([
     db4.pancakeCustomer.findMany({
       where: {
         AND: [
-          customerScope(grants, shopId),
+          customerScope(grants, shopId2),
           { OR: [{ name: text2 }, { phone: { contains: q2 } }] }
         ]
       },
@@ -322463,7 +322813,7 @@ async function globalSearch(db4, userId, input2) {
     db4.pancakeOrder.findMany({
       where: {
         AND: [
-          orderScope(grants, shopId),
+          orderScope(grants, shopId2),
           {
             OR: [
               { orderId: { contains: q2 } },
@@ -322487,7 +322837,7 @@ async function globalSearch(db4, userId, input2) {
     }),
     db4.pancakeLead.findMany({
       where: {
-        shopId,
+        shopId: shopId2,
         OR: [{ name: text2 }, { phone: { contains: q2 } }, { email: text2 }]
       },
       select: { id: true, name: true, phone: true, status: true },
@@ -322496,7 +322846,7 @@ async function globalSearch(db4, userId, input2) {
     }),
     db4.pancakeTicket.findMany({
       where: {
-        shopId,
+        shopId: shopId2,
         OR: [
           { title: text2 },
           { contactName: text2 },
@@ -322619,13 +322969,13 @@ function ageBucket(birthday, now2) {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(birthday ?? "");
   if (!match)
     return "unknown";
-  const [year2, month, day2] = [
+  const [year2, month2, day2] = [
     Number(match[1]),
     Number(match[2]),
     Number(match[3])
   ];
   const today = now2.toISOString().slice(5, 10);
-  const age = now2.getUTCFullYear() - year2 - (today < `${String(month).padStart(2, "0")}-${String(day2).padStart(2, "0")}` ? 1 : 0);
+  const age = now2.getUTCFullYear() - year2 - (today < `${String(month2).padStart(2, "0")}-${String(day2).padStart(2, "0")}` ? 1 : 0);
   if (age < 0 || age > 120)
     return "unknown";
   const index = PANCAKE.ageBuckets.findIndex((edge) => age < edge);
@@ -322774,11 +323124,16 @@ async function taskReport(db4, userId, input2) {
       OR: range ? [{ createdAt: range }, { completedAt: range }, { dueAt: range }] : undefined
     },
     select: { createdAt: true, completedAt: true, dueAt: true, status: true },
-    take: PANCAKE.exportMaxRows
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    take: PANCAKE.exportMaxRows + 1
   });
+  const truncated = tasks.length > PANCAKE.exportMaxRows;
+  const timeZone = await shopTimezoneOf(db4, input2.shopId);
   return {
-    timezone: shopTimezone(input2.shopId),
-    ...taskSeries(tasks, input2, new Date, shopTimezone(input2.shopId))
+    timezone: timeZone,
+    truncated,
+    limit: PANCAKE.exportMaxRows,
+    ...taskSeries(tasks.slice(0, PANCAKE.exportMaxRows), input2, new Date, timeZone)
   };
 }
 
@@ -322807,21 +323162,21 @@ class PancakeTaskConflict extends Error {
     super("TASK_CONFLICT");
   }
 }
-async function writableOrder(db4, userId, shopId, orderId) {
-  const grants = await assertShopWriter(db4, userId, shopId);
-  const grant = grants.find((entry) => entry.shopId === shopId);
+async function writableOrder(db4, userId, shopId2, orderId) {
+  const grants = await assertShopWriter(db4, userId, shopId2);
+  const grant = grants.find((entry) => entry.shopId === shopId2);
   if (!grant)
     throw new PancakeAccessError;
   const order = await db4.pancakeOrder.findFirst({
-    where: { AND: [orderScope(grants, shopId), { shopId, orderId }] },
+    where: { AND: [orderScope(grants, shopId2), { shopId: shopId2, orderId }] },
     select: { sellerId: true }
   });
   if (!order)
     throw new PancakeAccessError;
   return { grant, order };
 }
-async function taskAssignees(db4, userId, shopId, orderId) {
-  const { grant, order } = await writableOrder(db4, userId, shopId, orderId);
+async function taskAssignees(db4, userId, shopId2, orderId) {
+  const { grant, order } = await writableOrder(db4, userId, shopId2, orderId);
   return db4.user.findMany({
     where: {
       id: grant.role === "TELESALE" ? userId : undefined,
@@ -322838,7 +323193,7 @@ async function taskAssignees(db4, userId, shopId, orderId) {
         {
           pancakeMemberships: {
             some: {
-              shopId,
+              shopId: shopId2,
               OR: [
                 { role: "MANAGER" },
                 {
@@ -322962,321 +323317,6 @@ var import_nestjs_trpc15 = __toESM(require_dist8(), 1);
 
 // ../../packages/pancake/src/notifications.ts
 init_zod();
-
-// ../../packages/pancake/src/settings.ts
-init_zod();
-class PancakeSavedFilterLimit extends Error {
-  constructor() {
-    super("SAVED_FILTER_LIMIT");
-  }
-}
-var shopId = exports_external.string().min(1);
-var currency = exports_external.string().regex(/^[A-Z]{3}$/);
-var timezone = exports_external.string().min(1).max(64).refine((value) => {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
-}, "Invalid IANA time zone");
-var settingsFields = exports_external.object({
-  displayName: exports_external.string().trim().max(160).nullable(),
-  currency,
-  timezone,
-  countries: exports_external.array(exports_external.string().regex(/^[A-Z]{2}$/)).max(50),
-  dialCode: exports_external.string().regex(/^\d{1,4}$/).nullable(),
-  showSamePhoneOnConversation: exports_external.boolean(),
-  mergeOrdersByPhone: exports_external.boolean(),
-  customerSources: exports_external.array(exports_external.string().trim().min(1).max(120)).max(100)
-});
-var updateSettingsInput = settingsFields.partial().extend({ shopId });
-var copySettingsInput = exports_external.object({ sourceShopId: shopId, targetShopId: shopId }).refine((v2) => v2.sourceShopId !== v2.targetShopId, "Same shop");
-function defaultSettings(id2) {
-  return {
-    displayName: null,
-    currency: PANCAKE.shopCurrency.get(id2) ?? PANCAKE.defaultCurrency,
-    timezone: shopTimezone(id2),
-    countries: [],
-    dialCode: PANCAKE.shopDialCode.get(id2) ?? null,
-    showSamePhoneOnConversation: false,
-    mergeOrdersByPhone: false,
-    customerSources: []
-  };
-}
-async function effectiveSettings(db4, id2) {
-  const fallback = defaultSettings(id2);
-  const row = await db4.pancakeShopSettings.findUnique({
-    where: { shopId: id2 }
-  });
-  if (!row)
-    return { ...fallback, saved: false, updatedAt: null };
-  return {
-    displayName: row.displayName,
-    currency: row.currency ?? fallback.currency,
-    timezone: row.timezone ?? fallback.timezone,
-    countries: row.countries,
-    dialCode: row.dialCode ?? fallback.dialCode,
-    showSamePhoneOnConversation: row.showSamePhoneOnConversation,
-    mergeOrdersByPhone: row.mergeOrdersByPhone,
-    customerSources: row.customerSources,
-    saved: true,
-    updatedAt: row.updatedAt.toISOString()
-  };
-}
-async function shopTimezoneOf(db4, id2) {
-  return (await effectiveSettings(db4, id2)).timezone;
-}
-async function getSettings(db4, userId, id2) {
-  const grants = await assertShopReader(db4, userId, id2);
-  return {
-    shopId: id2,
-    ...await effectiveSettings(db4, id2),
-    canManage: canManage(grants, id2)
-  };
-}
-function changedKeys(patch) {
-  return Object.entries(patch).filter(([, value]) => value !== undefined).map(([key]) => key);
-}
-async function updateSettings(db4, userId, input2) {
-  await assertShopManager(db4, userId, input2.shopId);
-  const { shopId: id2, ...patch } = input2;
-  await db4.$transaction(async (tx) => {
-    await tx.pancakeShopSettings.upsert({
-      where: { shopId: id2 },
-      create: { ...defaultSettings(id2), ...patch, shopId: id2 },
-      update: patch
-    });
-    await writeAudit(tx, {
-      shopId: id2,
-      userId,
-      area: "settings",
-      action: "update",
-      summary: `Cập nhật cài đặt: ${changedKeys(patch).join(", ") || "không đổi"}`
-    });
-  });
-  return getSettings(db4, userId, id2);
-}
-async function copySettings(db4, userId, input2) {
-  await Promise.all([
-    assertShopManager(db4, userId, input2.sourceShopId),
-    assertShopManager(db4, userId, input2.targetShopId)
-  ]);
-  const { displayName, saved, updatedAt, ...copied } = await effectiveSettings(db4, input2.sourceShopId);
-  await db4.$transaction(async (tx) => {
-    await tx.pancakeShopSettings.upsert({
-      where: { shopId: input2.targetShopId },
-      create: { ...copied, shopId: input2.targetShopId },
-      update: copied
-    });
-    await writeAudit(tx, {
-      shopId: input2.targetShopId,
-      userId,
-      area: "settings",
-      action: "copy",
-      summary: `Sao chép cấu hình từ shop ${input2.sourceShopId}`
-    });
-  });
-  return getSettings(db4, userId, input2.targetShopId);
-}
-var month = exports_external.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
-var revenueTargetsInput = exports_external.object({
-  shopId,
-  year: exports_external.number().int().min(2000).max(2100).optional()
-});
-var setRevenueTargetInput = exports_external.object({
-  shopId,
-  month,
-  currency,
-  amount: exports_external.string().regex(/^\d{1,18}(\.\d{1,4})?$/).nullable()
-});
-async function revenueTargets(db4, userId, input2) {
-  await assertShopReader(db4, userId, input2.shopId);
-  const rows = await db4.pancakeRevenueTarget.findMany({
-    where: {
-      shopId: input2.shopId,
-      month: input2.year ? { startsWith: `${input2.year}-` } : undefined
-    },
-    select: { month: true, currency: true, amount: true },
-    orderBy: [{ month: "asc" }, { currency: "asc" }]
-  });
-  return rows.map((row) => ({ ...row, amount: row.amount.toString() }));
-}
-async function setRevenueTarget(db4, userId, input2) {
-  await assertShopManager(db4, userId, input2.shopId);
-  const key = {
-    shopId_month_currency: {
-      shopId: input2.shopId,
-      month: input2.month,
-      currency: input2.currency
-    }
-  };
-  await db4.$transaction(async (tx) => {
-    if (input2.amount === null)
-      await tx.pancakeRevenueTarget.deleteMany({
-        where: {
-          shopId: input2.shopId,
-          month: input2.month,
-          currency: input2.currency
-        }
-      });
-    else
-      await tx.pancakeRevenueTarget.upsert({
-        where: key,
-        create: {
-          shopId: input2.shopId,
-          month: input2.month,
-          currency: input2.currency,
-          amount: new exports_prismaNamespace.Decimal(input2.amount)
-        },
-        update: { amount: new exports_prismaNamespace.Decimal(input2.amount) }
-      });
-    await writeAudit(tx, {
-      shopId: input2.shopId,
-      userId,
-      area: "settings",
-      action: "revenue_target",
-      summary: input2.amount === null ? `Xóa mục tiêu doanh thu ${input2.month} ${input2.currency}` : `Đặt mục tiêu doanh thu ${input2.month}: ${input2.amount} ${input2.currency}`
-    });
-  });
-  return {
-    month: input2.month,
-    currency: input2.currency,
-    amount: input2.amount
-  };
-}
-var preferenceFields = exports_external.object({
-  disableAppNotifications: exports_external.boolean(),
-  browserNotifications: exports_external.boolean(),
-  sound: exports_external.string().refine((value) => PANCAKE.notificationSounds.includes(value), "Sound")
-});
-var updatePreferenceInput = preferenceFields.partial().extend({ shopId });
-async function getPreferences(db4, userId, id2) {
-  await assertShopReader(db4, userId, id2);
-  const row = await db4.pancakeUserPreference.findUnique({
-    where: { userId_shopId: { userId, shopId: id2 } },
-    select: {
-      disableAppNotifications: true,
-      browserNotifications: true,
-      sound: true
-    }
-  });
-  return {
-    shopId: id2,
-    ...row ?? {
-      disableAppNotifications: false,
-      browserNotifications: false,
-      sound: PANCAKE.defaultSound
-    },
-    sounds: [...PANCAKE.notificationSounds]
-  };
-}
-async function updatePreferences(db4, userId, input2) {
-  await assertShopReader(db4, userId, input2.shopId);
-  const { shopId: id2, ...patch } = input2;
-  await db4.pancakeUserPreference.upsert({
-    where: { userId_shopId: { userId, shopId: id2 } },
-    create: { userId, shopId: id2, ...patch },
-    update: patch
-  });
-  return getPreferences(db4, userId, id2);
-}
-var SAVED_FILTER_PAGES = [
-  "leads",
-  "contacts",
-  "orders",
-  "appointments",
-  "tickets",
-  "products"
-];
-var savedFilterListInput = exports_external.object({
-  shopId,
-  page: exports_external.enum(SAVED_FILTER_PAGES)
-});
-var createSavedFilterInput = savedFilterListInput.extend({
-  name: exports_external.string().trim().min(1).max(80),
-  params: savedFilterParams,
-  isDefault: exports_external.boolean().default(false)
-});
-var savedFilterRefInput = exports_external.object({ shopId, id: exports_external.string().min(1) });
-var setDefaultSavedFilterInput = savedFilterRefInput.extend({
-  isDefault: exports_external.boolean().default(true)
-});
-async function listSavedFilters(db4, userId, input2) {
-  await assertShopReader(db4, userId, input2.shopId);
-  const rows = await db4.pancakeSavedFilter.findMany({
-    where: { userId, shopId: input2.shopId, page: input2.page },
-    select: {
-      id: true,
-      page: true,
-      name: true,
-      params: true,
-      isDefault: true,
-      createdAt: true
-    },
-    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }]
-  });
-  return {
-    max: PANCAKE.savedFilterMax,
-    rows: rows.map((row) => ({
-      ...row,
-      params: parseSavedFilterParams(row.params),
-      createdAt: row.createdAt.toISOString()
-    }))
-  };
-}
-async function createSavedFilter(db4, userId, input2) {
-  await assertShopReader(db4, userId, input2.shopId);
-  return db4.$transaction(async (tx) => {
-    const scope = { userId, shopId: input2.shopId, page: input2.page };
-    if (await tx.pancakeSavedFilter.count({ where: scope }) >= PANCAKE.savedFilterMax)
-      throw new PancakeSavedFilterLimit;
-    if (input2.isDefault)
-      await tx.pancakeSavedFilter.updateMany({
-        where: scope,
-        data: { isDefault: false }
-      });
-    return tx.pancakeSavedFilter.create({
-      data: {
-        ...scope,
-        name: input2.name,
-        params: input2.params,
-        isDefault: input2.isDefault
-      },
-      select: { id: true }
-    });
-  });
-}
-async function ownFilter(db4, userId, shop, id2) {
-  const row = await db4.pancakeSavedFilter.findFirst({
-    where: { id: id2, userId, shopId: shop },
-    select: { id: true, page: true }
-  });
-  if (!row)
-    throw new PancakeAccessError;
-  return row;
-}
-async function deleteSavedFilter(db4, userId, input2) {
-  const row = await ownFilter(db4, userId, input2.shopId, input2.id);
-  await db4.pancakeSavedFilter.delete({ where: { id: row.id } });
-  return { id: row.id };
-}
-async function setDefaultSavedFilter(db4, userId, input2) {
-  const row = await ownFilter(db4, userId, input2.shopId, input2.id);
-  await db4.$transaction([
-    db4.pancakeSavedFilter.updateMany({
-      where: { userId, shopId: input2.shopId, page: row.page },
-      data: { isDefault: false }
-    }),
-    db4.pancakeSavedFilter.update({
-      where: { id: row.id },
-      data: { isDefault: input2.isDefault }
-    })
-  ]);
-  return { id: row.id, isDefault: input2.isDefault };
-}
-
-// ../../packages/pancake/src/notifications.ts
 var ENTITY_LABELS = {
   lead: "tiềm năng",
   appointment: "lịch hẹn",
@@ -323319,9 +323359,28 @@ async function eventAssignees(db4, event) {
 function matchesAutomation(automation, event) {
   return automation.enabled && !automation.archivedAt && automation.trigger === event.trigger && automation.entity === event.entity;
 }
-function automationSupported(action) {
-  return PANCAKE.automationInternalActions.includes(action);
+function automationSupported(action, trigger, entity) {
+  return PANCAKE.automationInternalActions.includes(action) && (trigger === undefined || PANCAKE.automationRunnableTriggers.includes(trigger)) && (entity === undefined || PANCAKE.automationRunnableEntities.includes(entity));
 }
+var automationCache = new Map;
+function loadAutomations(db4, shopId2) {
+  return db4.pancakeAutomation.findMany({
+    where: { shopId: shopId2, enabled: true, archivedAt: null },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+  });
+}
+async function activeAutomations(db4, shopId2) {
+  const hit = automationCache.get(shopId2);
+  if (hit && Date.now() - hit.at < PANCAKE.automationCacheMs)
+    return hit.rows;
+  const rows = await loadAutomations(db4, shopId2);
+  automationCache.set(shopId2, { at: Date.now(), rows });
+  return rows;
+}
+function forgetAutomations(shopId2) {
+  automationCache.delete(shopId2);
+}
+var reminderSyncedAt = new Map;
 async function reassign(db4, event, assigneeId) {
   const employee = await db4.pancakeEmployee.findUnique({
     where: {
@@ -323356,10 +323415,7 @@ async function mutedUsers(db4, shopId2, userIds) {
 }
 async function recordEffects(db4, actorId, event) {
   const drafts = event.assignedNow ? assignmentDrafts(event, await eventAssignees(db4, event), actorId) : [];
-  const candidates = event.entity === "task" ? [] : await db4.pancakeAutomation.findMany({
-    where: { shopId: event.shopId, enabled: true, archivedAt: null },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }]
-  });
+  const candidates = event.entity === "task" ? [] : await activeAutomations(db4, event.shopId);
   const results = [];
   let current = event;
   for (const automation of candidates.filter((row) => matchesAutomation(row, event))) {
@@ -323525,6 +323581,11 @@ var markAllReadInput = exports_external.object({
 async function readerContext(db4, userId, id2) {
   const grants = await assertShopReader(db4, userId, id2);
   const employeeId = grants.find((grant) => grant.shopId === id2)?.employeeId ?? null;
+  const key = `${userId}:${id2}`;
+  const last = reminderSyncedAt.get(key) ?? 0;
+  if (Date.now() - last < PANCAKE.reminderSyncMs)
+    return;
+  reminderSyncedAt.set(key, Date.now());
   if ((await mutedUsers(db4, id2, [userId])).size)
     return;
   await syncReminders(db4, userId, id2, employeeId, await shopTimezoneOf(db4, id2));
@@ -323641,7 +323702,7 @@ function automationView(row) {
     action: row.action,
     config: row.config
   });
-  const supported2 = automationSupported(row.action);
+  const supported2 = automationSupported(row.action, row.trigger, row.entity);
   return {
     id: row.id,
     name: row.name,
@@ -323720,7 +323781,7 @@ async function ownedAutomation(db4, shop, id2) {
 }
 async function createAutomation(db4, userId, input2) {
   await assertShopManager(db4, userId, input2.shopId);
-  return db4.$transaction(async (tx) => {
+  const view = await db4.$transaction(async (tx) => {
     const row = await tx.pancakeAutomation.create({
       data: {
         shopId: input2.shopId,
@@ -323744,6 +323805,8 @@ async function createAutomation(db4, userId, input2) {
     });
     return automationView(row);
   });
+  forgetAutomations(input2.shopId);
+  return view;
 }
 async function updateAutomation(db4, userId, input2) {
   await assertShopManager(db4, userId, input2.shopId);
@@ -323753,7 +323816,7 @@ async function updateAutomation(db4, userId, input2) {
     rule: input2.rule ?? { action: current.action }
   }))
     throw new PancakeAutomationInvalid;
-  return db4.$transaction(async (tx) => {
+  const view = await db4.$transaction(async (tx) => {
     const row = await tx.pancakeAutomation.update({
       where: { id: current.id },
       data: {
@@ -323776,11 +323839,13 @@ async function updateAutomation(db4, userId, input2) {
     });
     return automationView(row);
   });
+  forgetAutomations(input2.shopId);
+  return view;
 }
 async function toggleAutomation(db4, userId, input2) {
   await assertShopManager(db4, userId, input2.shopId);
   const current = await ownedAutomation(db4, input2.shopId, input2.id);
-  return db4.$transaction(async (tx) => {
+  const view = await db4.$transaction(async (tx) => {
     const row = await tx.pancakeAutomation.update({
       where: { id: current.id },
       data: { enabled: input2.enabled },
@@ -323795,6 +323860,8 @@ async function toggleAutomation(db4, userId, input2) {
     });
     return automationView(row);
   });
+  forgetAutomations(input2.shopId);
+  return view;
 }
 async function archiveAutomation(db4, userId, input2) {
   await assertShopManager(db4, userId, input2.shopId);
@@ -323812,6 +323879,7 @@ async function archiveAutomation(db4, userId, input2) {
       summary: `Lưu trữ tự động hoá ${current.name}`
     });
   });
+  forgetAutomations(input2.shopId);
   return { id: current.id };
 }
 

@@ -34,7 +34,7 @@ async function Appointments({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
-	const filter = shopFilters(values, ctx.shopId, "week");
+	const filter = shopFilters(values, ctx.shopId, "week", ctx.shop.timezone);
 	const [sellers, report] = await Promise.all([
 		ctx.api.sellers.query({ shopId: ctx.shopId }),
 		ctx.api.appointmentReport.query({

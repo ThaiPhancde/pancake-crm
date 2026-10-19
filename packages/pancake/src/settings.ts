@@ -64,10 +64,35 @@ export function defaultSettings(id: string): ShopSettings {
 	};
 }
 
-export async function effectiveSettings(
+type EffectiveSettings = ShopSettings & {
+	saved: boolean;
+	updatedAt: string | null;
+};
+
+const settingsCache = new Map<
+	string,
+	{ at: number; value: Promise<EffectiveSettings> }
+>();
+
+function forgetSettings(id: string) {
+	settingsCache.delete(id);
+}
+
+export function effectiveSettings(
 	db: Db,
 	id: string,
-): Promise<ShopSettings & { saved: boolean; updatedAt: string | null }> {
+): Promise<EffectiveSettings> {
+	const hit = settingsCache.get(id);
+	if (hit && Date.now() - hit.at < PANCAKE.settingsCacheMs) return hit.value;
+	const value = loadSettings(db, id).catch((error) => {
+		settingsCache.delete(id);
+		throw error;
+	});
+	settingsCache.set(id, { at: Date.now(), value });
+	return value;
+}
+
+async function loadSettings(db: Db, id: string): Promise<EffectiveSettings> {
 	const fallback = defaultSettings(id);
 	const row = await db.pancakeShopSettings.findUnique({
 		where: { shopId: id },
@@ -91,7 +116,8 @@ export async function shopCurrencyOf(db: Db, id: string) {
 	return (await effectiveSettings(db, id)).currency;
 }
 
-export async function shopTimezoneOf(db: Db, id: string) {
+export async function shopTimezoneOf(db: Db, id?: string) {
+	if (!id) return shopTimezone();
 	return (await effectiveSettings(db, id)).timezone;
 }
 
@@ -131,6 +157,7 @@ export async function updateSettings(
 			summary: `Cập nhật cài đặt: ${changedKeys(patch).join(", ") || "không đổi"}`,
 		});
 	});
+	forgetSettings(id);
 	return getSettings(db, userId, id);
 }
 
@@ -161,6 +188,7 @@ export async function copySettings(
 			summary: `Sao chép cấu hình từ shop ${input.sourceShopId}`,
 		});
 	});
+	forgetSettings(input.targetShopId);
 	return getSettings(db, userId, input.targetShopId);
 }
 

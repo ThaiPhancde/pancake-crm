@@ -13,6 +13,7 @@ export const LIST_CONFIG = {
 	oneWayReason: "Dữ liệu đồng bộ một chiều từ Pancake POS",
 	failedIdsShown: 5,
 	unassigned: "none",
+	downloadRevokeMs: 10_000,
 } as const;
 
 export type SavedFilterPage =

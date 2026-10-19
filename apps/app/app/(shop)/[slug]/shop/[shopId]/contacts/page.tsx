@@ -57,7 +57,7 @@ async function Contacts({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
-	const filter = shopFilters(values, ctx.shopId);
+	const filter = shopFilters(values, ctx.shopId, undefined, ctx.shop.timezone);
 	const selectedCustomerId = text(values, "customerId");
 	const fullView = text(values, "full") === "1";
 	const statsShown = text(values, "stats") !== "0";

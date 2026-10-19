@@ -22,7 +22,6 @@ import {
 	ProductTypeHoverBadge,
 } from "@/components/shop/product-image-preview";
 import { CreateRecordButton } from "@/components/shop/record-sheet";
-import { shopProfile } from "@/components/shop/shop-profile";
 
 export default function ProductsPage(props: {
 	params: Promise<ShopRoute>;
@@ -43,10 +42,10 @@ async function Products({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
-	const filter = shopFilters(values, ctx.shopId);
+	const filter = shopFilters(values, ctx.shopId, undefined, ctx.shop.timezone);
 	const products = await ctx.api.products.query(filter.input);
 	const collection = COLLECTIONS.product;
-	const currency = shopProfile(ctx.shopId).currency;
+	const currency = ctx.shop.currency;
 	const columns = collection.fields
 		.filter((field) => field.list)
 		.map((field) => ({ key: field.key, label: field.label }));

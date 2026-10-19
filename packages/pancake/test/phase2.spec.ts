@@ -140,6 +140,18 @@ describe("automations", () => {
 		expect(automationSupported("assign_to")).toBe(true);
 		expect(automationSupported("send_email")).toBe(false);
 		expect(automationSupported("json_api")).toBe(false);
+		expect(
+			automationSupported("notify_assignee", "record_created", "lead"),
+		).toBe(true);
+		expect(automationSupported("notify_assignee", "birthday", "lead")).toBe(
+			false,
+		);
+		expect(
+			automationSupported("notify_assignee", "appointment_due", "appointment"),
+		).toBe(false);
+		expect(
+			automationSupported("notify_assignee", "record_updated", "order"),
+		).toBe(false);
 	});
 	test("self assignment does not notify", () => {
 		expect(assignmentDrafts(event, ["u1", "u2"], "u1")).toHaveLength(1);

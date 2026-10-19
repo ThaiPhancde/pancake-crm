@@ -1,6 +1,5 @@
 import Checkmark from "@carbon/icons-react/es/Checkmark";
 import Filter from "@carbon/icons-react/es/Filter";
-import { shopTimezone } from "@crm/pancake/config";
 import { Alert, AlertDescription, AlertTitle } from "@crm/ui/components/alert";
 import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
@@ -70,7 +69,7 @@ async function History({
 	const label = HISTORY_TABS.find((item) => item.value === tab)?.label ?? "";
 	const areaLabel = (area: string) =>
 		HISTORY_TABS.find((item) => item.value === area)?.label ?? area;
-	const timeZone = shopTimezone(ctx.shopId);
+	const timeZone = ctx.shop.timezone;
 
 	if (!history) {
 		return (

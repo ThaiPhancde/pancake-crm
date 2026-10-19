@@ -109,7 +109,12 @@ async function Leads({
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
 	const pageNum = Math.max(1, Number(text(values, "page") || "1"));
-	const filter = shopFilters({ ...values, status: undefined }, ctx.shopId);
+	const filter = shopFilters(
+		{ ...values, status: undefined },
+		ctx.shopId,
+		undefined,
+		ctx.shop.timezone,
+	);
 	const page = `${ctx.base}/leads`;
 	const leadId = text(values, "leadId");
 	const recordInput = {

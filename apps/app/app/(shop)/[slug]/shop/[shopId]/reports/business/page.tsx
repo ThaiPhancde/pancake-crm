@@ -16,7 +16,6 @@ import {
 } from "@/components/shop/reports/config";
 import { ExportCsvButton } from "@/components/shop/reports/export-button";
 import { UrlSelect } from "@/components/shop/reports/url-select";
-import { shopProfile } from "@/components/shop/shop-profile";
 import { ShopTrendChart } from "@/components/shop/shop-trend-chart";
 import { initials } from "@/lib/initials";
 
@@ -39,7 +38,7 @@ async function Business({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
-	const filter = shopFilters(values, ctx.shopId, "week");
+	const filter = shopFilters(values, ctx.shopId, "week", ctx.shop.timezone);
 	const grouping: ReportGrouping =
 		REPORT_GROUPINGS.find((item) => item.value === text(values, "grouping"))
 			?.value ?? "day";
@@ -49,7 +48,7 @@ async function Business({
 		ctx.api.report.query({ ...filter.input, grouping }),
 		ctx.api.sellers.query({ shopId: ctx.shopId }),
 	]);
-	const shopCurrency = shopProfile(ctx.shopId).currency;
+	const shopCurrency = ctx.shop.currency;
 	const currency = report.seriesCurrency;
 	const closed = report.orders - report.cancelled;
 	const staff = sellers.map((seller) => ({

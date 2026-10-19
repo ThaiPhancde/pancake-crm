@@ -13,13 +13,7 @@ import {
 	shopGrants,
 } from "./access";
 import { writeAudit } from "./admin";
-import {
-	ORDER_VIEWS,
-	PANCAKE,
-	RESOURCES,
-	shopTimezone,
-	spendSince,
-} from "./config";
+import { ORDER_VIEWS, PANCAKE, RESOURCES, spendSince } from "./config";
 import {
 	type approveEmployeeInput,
 	type createAppointmentInput,
@@ -41,6 +35,7 @@ import {
 	type updateTicketInput,
 } from "./contracts";
 import { phoneTail } from "./phone";
+import { effectiveSettings, shopTimezoneOf } from "./settings";
 
 export function splitList(raw?: string): string[] {
 	return [
@@ -1110,7 +1105,7 @@ async function dailyOrderSeries(
 ) {
 	const received = Prisma.join([...PANCAKE.receivedStatuses]);
 	const excluded = Prisma.join([...PANCAKE.bookedExcludedStatuses]);
-	const timeZone = shopTimezone(input.shopId);
+	const timeZone = await shopTimezoneOf(db, input.shopId);
 	const rows = z.array(dailyRow).parse(
 		await db.$queryRaw`
 			SELECT to_char((o."sourceCreatedAt" AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD') AS day,
@@ -1266,7 +1261,7 @@ export async function dashboardReport(
 			revenue: into.revenue + row.revenue,
 			received: into.received + row.received,
 		})),
-		timezone: shopTimezone(input.shopId),
+		timezone: await shopTimezoneOf(db, input.shopId),
 		revenue: amounts(booked),
 		receivedRevenue: amounts(collected),
 		averageOrderValue: [...booked].map(([currency, amount]) => ({
@@ -1318,9 +1313,18 @@ export async function connectionStatus(db: Db, userId: string) {
 		},
 		orderBy: { name: "asc" },
 	});
+	const settings = new Map(
+		await Promise.all(
+			shops.map(
+				async (shop) =>
+					[shop.id, await effectiveSettings(db, shop.id)] as const,
+			),
+		),
+	);
 	return shops.map((shop) => ({
 		...shop,
-		currency: PANCAKE.shopCurrency.get(shop.id) ?? PANCAKE.defaultCurrency,
+		currency: settings.get(shop.id)?.currency ?? PANCAKE.defaultCurrency,
+		timezone: settings.get(shop.id)?.timezone ?? PANCAKE.timezone,
 		ordersCount: shop._count.orders,
 		customersCount: shop._count.customers,
 		employeesCount: shop._count.employees,
@@ -1681,7 +1685,9 @@ export async function listLeads(
 						AND: [
 							mine,
 							{
-								createdAt: { gte: weekStart(now, shopTimezone(input.shopId)) },
+								createdAt: {
+									gte: weekStart(now, await shopTimezoneOf(db, input.shopId)),
+								},
 							},
 						],
 					}
@@ -2104,6 +2110,7 @@ const ticketMonthRow = z.object({
 export async function ticketReport(db: Db, userId: string, input: ReportInput) {
 	await reportAccess(db, userId, input);
 	const now = new Date();
+	const timeZone = await shopTimezoneOf(db, input.shopId);
 	const where: Prisma.PancakeTicketWhereInput = {
 		shopId: input.shopId,
 		createdAt: dateRange(input.from, input.to),
@@ -2146,7 +2153,7 @@ export async function ticketReport(db: Db, userId: string, input: ReportInput) {
 			}),
 			db.pancakeTicket.count({ where: { AND: [where, overdueTicket(now)] } }),
 			db.$queryRaw`
-				SELECT to_char((t."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${shopTimezone(input.shopId)}, 'YYYY-MM') AS month,
+				SELECT to_char((t."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM') AS month,
 					count(*)::float8 AS total,
 					(count(*) FILTER (WHERE t.status IN (${doneStatuses})))::float8 AS "completed",
 					(count(*) FILTER (WHERE t.status IN (${doneStatuses}) AND t."dueAt" IS NOT NULL))::float8 AS "completedWithDue",

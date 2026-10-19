@@ -35,7 +35,7 @@ async function Tasks({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
-	const filter = shopFilters(values, ctx.shopId, "week");
+	const filter = shopFilters(values, ctx.shopId, "week", ctx.shop.timezone);
 	const [all, summary] = await Promise.all([
 		ctx.api.tasks.query({ ...filter.input, taskView: "all" }),
 		ctx.api.taskReport.query({
@@ -65,7 +65,11 @@ async function Tasks({
 			</ReportCard>
 			<ReportCard
 				title="Xu hướng nhiệm vụ theo thời gian"
-				description="Di chuột lên biểu đồ để xem chi tiết"
+				description={
+					summary.truncated
+						? `Chỉ tính ${summary.limit.toLocaleString("vi-VN")} nhiệm vụ mới nhất trong khoảng thời gian này`
+						: "Di chuột lên biểu đồ để xem chi tiết"
+				}
 			>
 				{hasTrend ? (
 					<ShopTrendChart

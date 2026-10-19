@@ -7,7 +7,7 @@ import {
 	PancakeAccessError,
 } from "./access";
 import { writeAudit } from "./admin";
-import { PANCAKE, shopTimezone } from "./config";
+import { PANCAKE } from "./config";
 import {
 	type bulkUpdateInput,
 	customerProfileWire,
@@ -25,6 +25,7 @@ import {
 	updateTicket,
 	zonedDay,
 } from "./queries";
+import { shopTimezoneOf } from "./settings";
 
 export const searchInput = z.object({
 	shopId: z.string().min(1),
@@ -443,10 +444,20 @@ export async function taskReport(db: Db, userId: string, input: ReportInput) {
 				: undefined,
 		},
 		select: { createdAt: true, completedAt: true, dueAt: true, status: true },
-		take: PANCAKE.exportMaxRows,
+		orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+		take: PANCAKE.exportMaxRows + 1,
 	});
+	const truncated = tasks.length > PANCAKE.exportMaxRows;
+	const timeZone = await shopTimezoneOf(db, input.shopId);
 	return {
-		timezone: shopTimezone(input.shopId),
-		...taskSeries(tasks, input, new Date(), shopTimezone(input.shopId)),
+		timezone: timeZone,
+		truncated,
+		limit: PANCAKE.exportMaxRows,
+		...taskSeries(
+			tasks.slice(0, PANCAKE.exportMaxRows),
+			input,
+			new Date(),
+			timeZone,
+		),
 	};
 }

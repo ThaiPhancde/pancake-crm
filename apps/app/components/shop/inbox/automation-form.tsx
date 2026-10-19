@@ -34,6 +34,7 @@ import {
 	type AutomationEntity,
 	type AutomationTrigger,
 	JSON_API_METHODS,
+	RUNNABLE_TRIGGERS,
 	SUPPORTED_ACTIONS,
 	UNSUPPORTED_LABEL,
 } from "./config";
@@ -299,6 +300,9 @@ function AutomationFormBody({
 	);
 	const pending = create.isPending || update.isPending;
 	const supported = SUPPORTED_ACTIONS.some((action) => action === draft.action);
+	const runnable =
+		RUNNABLE_TRIGGERS.some((trigger) => trigger === draft.trigger) &&
+		ASSIGNABLE_ENTITIES.some((entity) => entity === draft.entity);
 	const setField = (key: keyof AutomationFields) => (value: string) =>
 		setDraft((current) => ({
 			...current,
@@ -396,6 +400,14 @@ function AutomationFormBody({
 						<Badge variant="soft-orange">{UNSUPPORTED_LABEL}</Badge>
 						Hành động này được lưu nhưng chưa chạy. CRM chưa kết nối dịch vụ bên
 						ngoài.
+					</p>
+				)}
+				{runnable ? null : (
+					<p className="flex items-center gap-2 text-muted-foreground text-xs">
+						<Badge variant="soft-orange">{UNSUPPORTED_LABEL}</Badge>
+						Sự kiện hoặc đối tượng này được lưu nhưng chưa có bộ hẹn giờ nên quy
+						tắc chưa chạy. Chỉ Tiềm năng, Lịch hẹn và Vấn đề chạy khi bản ghi
+						được tạo, cập nhật hoặc chuyển đổi.
 					</p>
 				)}
 				{draft.action === "notify_assignee" ? (

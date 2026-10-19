@@ -25,6 +25,7 @@ export function shopFilters(
 	values: SearchValues,
 	shopId: string,
 	defaultRange?: RangeKey,
+	savedTimeZone?: string,
 ) {
 	const explicit = Boolean(text(values, "from") || text(values, "to"));
 	const range = isRangeKey(text(values, "range"))
@@ -32,7 +33,7 @@ export function shopFilters(
 		: explicit
 			? undefined
 			: defaultRange;
-	const timeZone = shopTimezone(shopId);
+	const timeZone = savedTimeZone ?? shopTimezone(shopId);
 	const bounds =
 		range && !explicit ? rangeBounds(range, new Date(), timeZone) : undefined;
 	const merged: SearchValues = {
@@ -41,7 +42,7 @@ export function shopFilters(
 		from: bounds?.from ?? text(values, "from"),
 		to: bounds?.to ?? text(values, "to"),
 	};
-	const parsed = parseFilters(merged);
+	const parsed = parseFilters(merged, timeZone);
 	return {
 		...parsed,
 		input: { ...parsed.input, shopId },

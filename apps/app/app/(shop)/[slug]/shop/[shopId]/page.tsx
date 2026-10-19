@@ -30,7 +30,6 @@ import {
 import { RangeToggle, RefreshButton } from "@/components/shop/range-picker";
 import { HorizontalBars, ReportCard } from "@/components/shop/report";
 import { RevenueTarget } from "@/components/shop/reports/revenue-target";
-import { shopProfile } from "@/components/shop/shop-profile";
 import { ShopTrendChart } from "@/components/shop/shop-trend-chart";
 import { getServerTrpcClient } from "@/lib/trpc/server";
 
@@ -108,7 +107,7 @@ async function monthGoal(
 		}),
 		settings.get.query({ shopId }),
 		getServerTrpcClient().pancake.report.query(
-			shopFilters({ range: "month" }, shopId).input,
+			shopFilters({ range: "month" }, shopId, undefined, timeZone).input,
 		),
 	]);
 	const monthTargets = targets.filter((row) => row.month === month);
@@ -137,7 +136,7 @@ async function Home({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
-	const filter = shopFilters(values, ctx.shopId, "30d");
+	const filter = shopFilters(values, ctx.shopId, "30d", ctx.shop.timezone);
 	const view =
 		text(values, "scope") === "personal" || text(values, "view") === "personal"
 			? "personal"
@@ -161,14 +160,17 @@ async function Home({
 		view === "personal"
 			? (personalEmployee?.employeeId ?? "__personal_none__")
 			: undefined;
-	const week = shopFilters({ range: "week" }, ctx.shopId).input;
+	const week = shopFilters(
+		{ range: "week" },
+		ctx.shopId,
+		undefined,
+		ctx.shop.timezone,
+	).input;
 	const goalRequest =
 		view === "manager"
-			? monthGoal(
-					ctx.shopId,
-					filter.timeZone,
-					shopProfile(ctx.shopId).currency,
-				).catch(() => null)
+			? monthGoal(ctx.shopId, filter.timeZone, ctx.shop.currency).catch(
+					() => null,
+				)
 			: null;
 	const [overview, report, customers, tasks, leads, tickets, appointments] =
 		await Promise.all([
@@ -214,7 +216,7 @@ async function Home({
 				: start.time,
 		};
 	});
-	const shopCurrency = shopProfile(ctx.shopId).currency;
+	const shopCurrency = ctx.shop.currency;
 	const currency = report.seriesCurrency;
 	const revenueText = formatAmounts(report.revenue, shopCurrency);
 	const receivedText = `Đã thu: ${formatAmounts(report.receivedRevenue, currency)}`;

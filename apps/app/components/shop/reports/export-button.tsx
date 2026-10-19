@@ -8,6 +8,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useTRPC } from "@/lib/trpc/client";
 import type { HistoryTab } from "../admin/config";
+import { LIST_CONFIG } from "../lists/config";
 import { REPORTS } from "./config";
 
 type CsvFile = {
@@ -34,7 +35,7 @@ function saveCsv(file: CsvFile) {
 		? file.filename
 		: `${file.filename}.csv`;
 	anchor.click();
-	URL.revokeObjectURL(url);
+	setTimeout(() => URL.revokeObjectURL(url), LIST_CONFIG.downloadRevokeMs);
 	if (file.truncated)
 		toast.info(
 			`Tệp chỉ gồm ${REPORTS.exportMaxRows.toLocaleString("vi-VN")} dòng đầu tiên.`,

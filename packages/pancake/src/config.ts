@@ -57,6 +57,19 @@ export const PANCAKE = {
 	]),
 	reminderWindowMs: 60 * MINUTE_MS,
 	reminderBatch: 50,
+	reminderSyncMs: 5 * MINUTE_MS,
+	automationCacheMs: 5_000,
+	settingsCacheMs: 30_000,
+	automationRunnableTriggers: [
+		"record_created",
+		"record_updated",
+		"converted",
+	] as readonly string[],
+	automationRunnableEntities: [
+		"lead",
+		"appointment",
+		"ticket",
+	] as readonly string[],
 	automationStatus: {
 		ok: "đã chạy",
 		unsupported: "chưa hỗ trợ",
@@ -76,7 +89,7 @@ export const PANCAKE = {
 	savedFilterMax: 10,
 	exportMaxRows: 5000,
 	searchLimit: 5,
-	bulkMax: 200,
+	bulkMax: 50,
 	historyMaxPage: 100,
 	leadConvertedStatus: "converted",
 	ageBuckets: [18, 25, 35, 45, 55] as readonly number[],

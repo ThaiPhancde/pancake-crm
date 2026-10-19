@@ -63,7 +63,7 @@ async function Orders({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
-	const filter = shopFilters(values, ctx.shopId);
+	const filter = shopFilters(values, ctx.shopId, undefined, ctx.shop.timezone);
 	const page = `${ctx.base}/orders`;
 	const [purchases, orders, sellers, detail, saved] = await Promise.all([
 		filter.customerId

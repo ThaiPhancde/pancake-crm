@@ -47,7 +47,11 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useTRPC } from "@/lib/trpc/client";
 import type { FieldOption } from "./collections";
-import type { FilterField, SavedFilterState } from "./lists/config";
+import {
+	type FilterField,
+	LIST_CONFIG,
+	type SavedFilterState,
+} from "./lists/config";
 import {
 	SavedFilterItems,
 	SaveFilterActions,
@@ -539,7 +543,7 @@ export function MoreMenu({ exportRequest }: { exportRequest?: ExportRequest }) {
 			link.href = url;
 			link.download = file.filename;
 			link.click();
-			URL.revokeObjectURL(url);
+			setTimeout(() => URL.revokeObjectURL(url), LIST_CONFIG.downloadRevokeMs);
 			if (file.truncated)
 				toast.warning(`File chỉ gồm ${file.rows} dòng đầu tiên.`);
 			else toast.success(`Đã xuất ${file.rows} dòng`);

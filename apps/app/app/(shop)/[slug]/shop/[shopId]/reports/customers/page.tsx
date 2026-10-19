@@ -54,7 +54,7 @@ async function Customers({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
-	const filter = shopFilters(values, ctx.shopId, "week");
+	const filter = shopFilters(values, ctx.shopId, "week", ctx.shop.timezone);
 	const tab = text(values, "tab") === "leads" ? "leads" : "contacts";
 	const period = {
 		shopId: ctx.shopId,

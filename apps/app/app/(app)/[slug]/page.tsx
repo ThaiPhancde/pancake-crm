@@ -113,7 +113,12 @@ async function MultiShopDashboard({
 
 	const perShopReports = await Promise.all(
 		shops.map(async (shop) => {
-			const shopInput = shopFilters(values, shop.id, "30d").input;
+			const shopInput = shopFilters(
+				values,
+				shop.id,
+				"30d",
+				shop.timezone,
+			).input;
 			const [shopOverview, shopReport] = await Promise.all([
 				api.overview.query(shopInput),
 				api.report.query(shopInput),

@@ -48,6 +48,12 @@ export const ASSIGNABLE_ENTITIES = ["lead", "appointment", "ticket"] as const;
 
 export const SUPPORTED_ACTIONS = ["notify_assignee", "assign_to"] as const;
 
+export const RUNNABLE_TRIGGERS = [
+	"record_created",
+	"record_updated",
+	"converted",
+] as const;
+
 export const UNSUPPORTED_LABEL = "chưa hỗ trợ";
 
 export const JSON_API_METHODS = ["POST", "PUT", "PATCH"] as const;

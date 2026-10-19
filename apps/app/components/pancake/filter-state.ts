@@ -22,14 +22,14 @@ export function pancakeUrl(
 	return `${base}?${params}`;
 }
 
-export function parseFilters(values: SearchValues) {
+export function parseFilters(values: SearchValues, savedTimeZone?: string) {
 	const text = (key: string) => z.string().catch("").parse(values[key]);
 	const from = text("from");
 	const to = text("to");
 	const datesValid =
 		(!from || z.iso.date().safeParse(from).success) &&
 		(!to || z.iso.date().safeParse(to).success);
-	const timeZone = shopTimezone(text("shopId"));
+	const timeZone = savedTimeZone ?? shopTimezone(text("shopId"));
 	const end =
 		datesValid && to
 			? zonedMidnight(

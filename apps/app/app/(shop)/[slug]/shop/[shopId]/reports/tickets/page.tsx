@@ -36,7 +36,7 @@ async function Tickets({
 	searchParams: Promise<SearchValues>;
 }) {
 	const [ctx, values] = await Promise.all([loadShop(params), searchParams]);
-	const filter = shopFilters(values, ctx.shopId, "week");
+	const filter = shopFilters(values, ctx.shopId, "week", ctx.shop.timezone);
 	const report = await ctx.api.ticketReport.query({
 		shopId: ctx.shopId,
 		from: filter.input.from,

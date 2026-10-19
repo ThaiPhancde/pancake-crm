@@ -118,9 +118,45 @@ export function matchesAutomation(
 	);
 }
 
-export function automationSupported(action: string) {
-	return PANCAKE.automationInternalActions.includes(action);
+export function automationSupported(
+	action: string,
+	trigger?: string,
+	entity?: string,
+) {
+	return (
+		PANCAKE.automationInternalActions.includes(action) &&
+		(trigger === undefined ||
+			PANCAKE.automationRunnableTriggers.includes(trigger)) &&
+		(entity === undefined ||
+			PANCAKE.automationRunnableEntities.includes(entity))
+	);
 }
+
+const automationCache = new Map<
+	string,
+	{ at: number; rows: Awaited<ReturnType<typeof loadAutomations>> }
+>();
+
+function loadAutomations(db: Db, shopId: string) {
+	return db.pancakeAutomation.findMany({
+		where: { shopId, enabled: true, archivedAt: null },
+		orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+	});
+}
+
+async function activeAutomations(db: Db, shopId: string) {
+	const hit = automationCache.get(shopId);
+	if (hit && Date.now() - hit.at < PANCAKE.automationCacheMs) return hit.rows;
+	const rows = await loadAutomations(db, shopId);
+	automationCache.set(shopId, { at: Date.now(), rows });
+	return rows;
+}
+
+function forgetAutomations(shopId: string) {
+	automationCache.delete(shopId);
+}
+
+const reminderSyncedAt = new Map<string, number>();
 
 async function reassign(
 	db: Db,
@@ -166,12 +202,7 @@ export async function recordEffects(
 		? assignmentDrafts(event, await eventAssignees(db, event), actorId)
 		: [];
 	const candidates =
-		event.entity === "task"
-			? []
-			: await db.pancakeAutomation.findMany({
-					where: { shopId: event.shopId, enabled: true, archivedAt: null },
-					orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-				});
+		event.entity === "task" ? [] : await activeAutomations(db, event.shopId);
 	const results: { id: string; status: string }[] = [];
 	let current = event;
 	for (const automation of candidates.filter((row) =>
@@ -399,6 +430,10 @@ async function readerContext(db: Db, userId: string, id: string) {
 	const grants = await assertShopReader(db, userId, id);
 	const employeeId =
 		grants.find((grant) => grant.shopId === id)?.employeeId ?? null;
+	const key = `${userId}:${id}`;
+	const last = reminderSyncedAt.get(key) ?? 0;
+	if (Date.now() - last < PANCAKE.reminderSyncMs) return;
+	reminderSyncedAt.set(key, Date.now());
 	if ((await mutedUsers(db, id, [userId])).size) return;
 	await syncReminders(db, userId, id, employeeId, await shopTimezoneOf(db, id));
 }
@@ -557,7 +592,7 @@ function automationView(row: {
 		action: row.action,
 		config: row.config,
 	});
-	const supported = automationSupported(row.action);
+	const supported = automationSupported(row.action, row.trigger, row.entity);
 	return {
 		id: row.id,
 		name: row.name,
@@ -653,7 +688,7 @@ export async function createAutomation(
 	input: z.infer<typeof createAutomationInput>,
 ) {
 	await assertShopManager(db, userId, input.shopId);
-	return db.$transaction(async (tx) => {
+	const view = await db.$transaction(async (tx) => {
 		const row = await tx.pancakeAutomation.create({
 			data: {
 				shopId: input.shopId,
@@ -677,6 +712,8 @@ export async function createAutomation(
 		});
 		return automationView(row);
 	});
+	forgetAutomations(input.shopId);
+	return view;
 }
 
 export async function updateAutomation(
@@ -693,7 +730,7 @@ export async function updateAutomation(
 		})
 	)
 		throw new PancakeAutomationInvalid();
-	return db.$transaction(async (tx) => {
+	const view = await db.$transaction(async (tx) => {
 		const row = await tx.pancakeAutomation.update({
 			where: { id: current.id },
 			data: {
@@ -716,6 +753,8 @@ export async function updateAutomation(
 		});
 		return automationView(row);
 	});
+	forgetAutomations(input.shopId);
+	return view;
 }
 
 export async function toggleAutomation(
@@ -725,7 +764,7 @@ export async function toggleAutomation(
 ) {
 	await assertShopManager(db, userId, input.shopId);
 	const current = await ownedAutomation(db, input.shopId, input.id);
-	return db.$transaction(async (tx) => {
+	const view = await db.$transaction(async (tx) => {
 		const row = await tx.pancakeAutomation.update({
 			where: { id: current.id },
 			data: { enabled: input.enabled },
@@ -740,6 +779,8 @@ export async function toggleAutomation(
 		});
 		return automationView(row);
 	});
+	forgetAutomations(input.shopId);
+	return view;
 }
 
 export async function archiveAutomation(
@@ -762,5 +803,6 @@ export async function archiveAutomation(
 			summary: `Lưu trữ tự động hoá ${current.name}`,
 		});
 	});
+	forgetAutomations(input.shopId);
 	return { id: current.id };
 }
