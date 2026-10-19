@@ -145,6 +145,18 @@ async function reassign(
 	return true;
 }
 
+async function mutedUsers(db: Db, shopId: string, userIds: string[]) {
+	const rows = await db.pancakeUserPreference.findMany({
+		where: {
+			shopId,
+			userId: { in: [...new Set(userIds)] },
+			disableAppNotifications: true,
+		},
+		select: { userId: true },
+	});
+	return new Set(rows.map((row) => row.userId));
+}
+
 export async function recordEffects(
 	db: Db,
 	actorId: string,
@@ -204,12 +216,20 @@ export async function recordEffects(
 		});
 		results.push({ id: automation.id, status });
 	}
-	if (drafts.length)
+	const muted = drafts.length
+		? await mutedUsers(
+				db,
+				event.shopId,
+				drafts.map((draft) => draft.userId),
+			)
+		: new Set<string>();
+	const delivered = drafts.filter((draft) => !muted.has(draft.userId));
+	if (delivered.length)
 		await db.pancakeNotification.createMany({
-			data: drafts,
+			data: delivered,
 			skipDuplicates: true,
 		});
-	return { notifications: drafts.length, automations: results };
+	return { notifications: delivered.length, automations: results };
 }
 
 type ReminderSource = {
@@ -379,6 +399,7 @@ async function readerContext(db: Db, userId: string, id: string) {
 	const grants = await assertShopReader(db, userId, id);
 	const employeeId =
 		grants.find((grant) => grant.shopId === id)?.employeeId ?? null;
+	if ((await mutedUsers(db, id, [userId])).size) return;
 	await syncReminders(db, userId, id, employeeId, await shopTimezoneOf(db, id));
 }
 
@@ -605,11 +626,15 @@ export async function listAutomations(
 			where: { shopId: input.shopId, archivedAt: null, enabled: true },
 		}),
 	]);
+	const manager = canManage(grants, input.shopId);
 	return {
 		total,
 		active,
-		canManage: canManage(grants, input.shopId),
-		rows: rows.map(automationView),
+		canManage: manager,
+		rows: rows.map((row) => {
+			const view = automationView(row);
+			return manager ? view : { ...view, config: null };
+		}),
 	};
 }
 

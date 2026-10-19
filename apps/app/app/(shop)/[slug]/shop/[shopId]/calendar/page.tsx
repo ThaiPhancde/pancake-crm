@@ -99,7 +99,8 @@ async function Appointments({
 			(
 				await ctx.api.appointments.query({
 					shopId: ctx.shopId,
-					pageSize: PANCAKE.maxListSize,
+					id: appointmentId,
+					pageSize: 1,
 				})
 			).rows.find((row) => row.id === appointmentId))
 		: undefined;

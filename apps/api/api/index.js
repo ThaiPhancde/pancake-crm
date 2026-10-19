@@ -319795,6 +319795,7 @@ var recordListInput = exports_external.object({
   category: multiValue,
   quick: exports_external.string().max(40).optional(),
   customerId: exports_external.string().max(120).optional(),
+  id: exports_external.string().max(120).optional(),
   from: exports_external.iso.datetime({ offset: true }).optional(),
   to: exports_external.iso.datetime({ offset: true }).optional(),
   page: exports_external.number().int().min(1).max(1e5).default(1),
@@ -320057,7 +320058,7 @@ function canManage(grants, shopId) {
 // ../../packages/pancake/src/csv.ts
 function csvCell(value) {
   const text2 = value === null || value === undefined ? "" : String(value);
-  const safe = /^[=@\t\r]/.test(text2) ? `'${text2}` : text2;
+  const safe = /^[=@\t\r]/.test(text2) || /^[+-](?![\d\s().]*$)/.test(text2) ? `'${text2}` : text2;
   return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 function toCsv(header2, rows) {
@@ -321825,6 +321826,7 @@ async function listAppointments(db4, userId, input2) {
     AND: [
       {
         shopId: input2.shopId,
+        id: input2.id || undefined,
         customerId: input2.customerId || undefined,
         startAt: dateRange(input2.from, input2.to)
       },
@@ -321904,6 +321906,7 @@ async function listTickets(db4, userId, input2) {
     AND: [
       {
         shopId: input2.shopId,
+        id: input2.id || undefined,
         customerId: input2.customerId || undefined,
         createdAt: dateRange(input2.from, input2.to)
       },
@@ -323340,6 +323343,17 @@ async function reassign(db4, event, assigneeId) {
     return false;
   return true;
 }
+async function mutedUsers(db4, shopId2, userIds) {
+  const rows = await db4.pancakeUserPreference.findMany({
+    where: {
+      shopId: shopId2,
+      userId: { in: [...new Set(userIds)] },
+      disableAppNotifications: true
+    },
+    select: { userId: true }
+  });
+  return new Set(rows.map((row) => row.userId));
+}
 async function recordEffects(db4, actorId, event) {
   const drafts = event.assignedNow ? assignmentDrafts(event, await eventAssignees(db4, event), actorId) : [];
   const candidates = event.entity === "task" ? [] : await db4.pancakeAutomation.findMany({
@@ -323382,12 +323396,14 @@ async function recordEffects(db4, actorId, event) {
     });
     results.push({ id: automation.id, status });
   }
-  if (drafts.length)
+  const muted = drafts.length ? await mutedUsers(db4, event.shopId, drafts.map((draft) => draft.userId)) : new Set;
+  const delivered = drafts.filter((draft) => !muted.has(draft.userId));
+  if (delivered.length)
     await db4.pancakeNotification.createMany({
-      data: drafts,
+      data: delivered,
       skipDuplicates: true
     });
-  return { notifications: drafts.length, automations: results };
+  return { notifications: delivered.length, automations: results };
 }
 function reminderDrafts(now2, source, timeZone) {
   const time3 = (at) => new Intl.DateTimeFormat("vi-VN", {
@@ -323509,6 +323525,8 @@ var markAllReadInput = exports_external.object({
 async function readerContext(db4, userId, id2) {
   const grants = await assertShopReader(db4, userId, id2);
   const employeeId = grants.find((grant) => grant.shopId === id2)?.employeeId ?? null;
+  if ((await mutedUsers(db4, id2, [userId])).size)
+    return;
   await syncReminders(db4, userId, id2, employeeId, await shopTimezoneOf(db4, id2));
 }
 async function listNotifications(db4, userId, input2) {
@@ -323680,11 +323698,15 @@ async function listAutomations(db4, userId, input2) {
       where: { shopId: input2.shopId, archivedAt: null, enabled: true }
     })
   ]);
+  const manager = canManage(grants, input2.shopId);
   return {
     total,
     active,
-    canManage: canManage(grants, input2.shopId),
-    rows: rows.map(automationView)
+    canManage: manager,
+    rows: rows.map((row) => {
+      const view = automationView(row);
+      return manager ? view : { ...view, config: null };
+    })
   };
 }
 async function ownedAutomation(db4, shop, id2) {

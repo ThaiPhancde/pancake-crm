@@ -33,6 +33,10 @@ describe("csv", () => {
 		expect(csvCell(12.5)).toBe("12.5");
 		expect(csvCell("+971553409828")).toBe("+971553409828");
 		expect(csvCell("=SUM(A1)")).toBe("'=SUM(A1)");
+		expect(csvCell("-1500")).toBe("-1500");
+		expect(csvCell("+84 (912) 345")).toBe("+84 (912) 345");
+		expect(csvCell("-2+3")).toBe("'-2+3");
+		expect(csvCell("+HYPERLINK(1)")).toBe("'+HYPERLINK(1)");
 	});
 	test("starts with a BOM and uses CRLF", () => {
 		expect(toCsv(["A", "B"], [["1", "x,y"]])).toBe('﻿A,B\r\n1,"x,y"\r\n');

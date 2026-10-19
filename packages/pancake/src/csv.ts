@@ -4,7 +4,10 @@ export type CsvCell = string | number | boolean | null | undefined;
 
 export function csvCell(value: CsvCell): string {
 	const text = value === null || value === undefined ? "" : String(value);
-	const safe = /^[=@\t\r]/.test(text) ? `'${text}` : text;
+	const safe =
+		/^[=@\t\r]/.test(text) || /^[+-](?![\d\s().]*$)/.test(text)
+			? `'${text}`
+			: text;
 	return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 

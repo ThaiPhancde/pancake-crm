@@ -73,7 +73,8 @@ async function Tickets({
 			(
 				await ctx.api.tickets.query({
 					shopId: ctx.shopId,
-					pageSize: PANCAKE.maxListSize,
+					id: ticketId,
+					pageSize: 1,
 				})
 			).rows.find((row) => row.id === ticketId))
 		: undefined;

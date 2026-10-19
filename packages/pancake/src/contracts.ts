@@ -328,6 +328,7 @@ export const recordListInput = z
 		category: multiValue,
 		quick: z.string().max(40).optional(),
 		customerId: z.string().max(120).optional(),
+		id: z.string().max(120).optional(),
 		from: z.iso.datetime({ offset: true }).optional(),
 		to: z.iso.datetime({ offset: true }).optional(),
 		page: z.number().int().min(1).max(100_000).default(1),

@@ -1777,6 +1777,7 @@ export async function listAppointments(
 		AND: [
 			{
 				shopId: input.shopId,
+				id: input.id || undefined,
 				customerId: input.customerId || undefined,
 				startAt: dateRange(input.from, input.to),
 			},
@@ -1874,6 +1875,7 @@ export async function listTickets(
 		AND: [
 			{
 				shopId: input.shopId,
+				id: input.id || undefined,
 				customerId: input.customerId || undefined,
 				createdAt: dateRange(input.from, input.to),
 			},
