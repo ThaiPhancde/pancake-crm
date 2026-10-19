@@ -23,15 +23,22 @@ export const getSession = cache(async (): Promise<Session | null> => {
 	if (!cookie) return null;
 
 	try {
-		const { data, error } = await serverAuthClient.getSession({
-			fetchOptions: {
-				headers: { cookie },
-				cache: "no-store",
-			},
-		});
-		if (!error) return data ?? null;
-	} catch {
-		// Fall back to local auth lookup when API server is not reachable (e.g. unit tests)
+		for (let attempt = 0; ; attempt++) {
+			const { data, error } = await serverAuthClient.getSession({
+				fetchOptions: {
+					headers: { cookie },
+					cache: "no-store",
+				},
+			});
+			if (!error) return data ?? null;
+			if (error.status < 500) return null;
+			if (attempt >= 2) {
+				throw new SessionUnavailableError(error.status);
+			}
+			await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+		}
+	} catch (error) {
+		if (error instanceof SessionUnavailableError) throw error;
 	}
 
 	try {
@@ -40,6 +47,12 @@ export const getSession = cache(async (): Promise<Session | null> => {
 		return null;
 	}
 });
+
+class SessionUnavailableError extends Error {
+	constructor(status: number) {
+		super(`Session lookup failed with status ${status}.`);
+	}
+}
 
 export async function requireSession(): Promise<Session> {
 	const session = await getSession();

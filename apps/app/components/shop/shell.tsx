@@ -112,7 +112,11 @@ function ShopSwitcher({
 				) : (
 					visible.map((item) => (
 						<DropdownMenuItem key={item.id} asChild>
-							<Link href={shopUrl(slug, item.id)} className="gap-2">
+							<Link
+								href={shopUrl(slug, item.id)}
+								prefetch={false}
+								className="gap-2"
+							>
 								<span className="flex size-6 items-center justify-center rounded-sm bg-[#e5533d] font-semibold text-white text-xs">
 									{shopInitial(item.name)}
 								</span>
@@ -197,6 +201,7 @@ function NavLink({
 								<Link
 									key={child.href}
 									href={`${base}${child.href}`}
+									prefetch={false}
 									onClick={onNavigate}
 									aria-current={childActive ? "page" : undefined}
 									className={cn(
@@ -215,6 +220,7 @@ function NavLink({
 	return (
 		<Link
 			href={`${base}${item.href}`}
+			prefetch={false}
 			onClick={onNavigate}
 			aria-current={active ? "page" : undefined}
 			className={className}

@@ -1,5 +1,6 @@
-import { auth } from "@crm/auth";
+import { API_KEY_HEADER, AUTH_COOKIE_PREFIX, auth } from "@crm/auth";
 import { Injectable } from "@nestjs/common";
+import { getSessionCookie } from "better-auth/cookies";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Request } from "express";
 import type { ContextOptions, TRPCContext } from "nestjs-trpc";
@@ -17,6 +18,13 @@ async function resolveRequestSession(
 	if (existing) return existing;
 
 	const headers = fromNodeHeaders(req.headers);
+	if (
+		!headers.has(API_KEY_HEADER) &&
+		getSessionCookie(headers, { cookiePrefix: AUTH_COOKIE_PREFIX }) === null
+	) {
+		return null;
+	}
+
 	const lookup = auth.api
 		.getSession({ headers })
 		.catch(async () => {

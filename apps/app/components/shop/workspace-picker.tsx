@@ -272,6 +272,7 @@ export function WorkspacePicker({
 									<Link
 										key={shop.id}
 										href={`/${slug}/shop/${shop.id}`}
+										prefetch={false}
 										className="group flex min-h-[112px] flex-col justify-between rounded-xl border border-[#e5e6eb] bg-white p-5 shadow-2xs transition-all hover:border-[#1677ff] hover:shadow-md"
 									>
 										<div className="flex items-start justify-between gap-3">

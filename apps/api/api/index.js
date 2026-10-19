@@ -286681,8 +286681,8 @@ var createPrismaClient = () => {
   const client = new PrismaClient({
     adapter: new PrismaPgAdapterFactory({
       connectionString,
-      max: isServerless ? 2 : 3,
-      idleTimeoutMillis: 5000,
+      max: 3,
+      idleTimeoutMillis: isServerless ? 2000 : 5000,
       connectionTimeoutMillis: 15000
     }),
     log: logDefinitions
@@ -292381,6 +292381,73 @@ function fromNodeHeaders(nodeHeaders) {
   return webHeaders;
 }
 
+// ../../node_modules/.bun/better-auth@1.6.25+2fe26eff1b02ee55/node_modules/better-auth/dist/cookies/cookie-utils.mjs
+function tryDecode3(str) {
+  if (str.indexOf("%") === -1)
+    return str;
+  try {
+    return decodeURIComponent(str);
+  } catch {
+    return str;
+  }
+}
+var cookieNameRegex2 = /^[\x21\x23-\x27\x2A\x2B\x2D\x2E\x30-\x39\x41-\x5A\x5E\x5F\x60\x61-\x7A\x7C\x7E]+$/;
+var cookieValueRegex2 = /^[\x20\x21\x23-\x3A\x3C-\x5B\x5D-\x7E]*$/;
+function unquoteCookieValue2(value) {
+  if (value.length < 2 || !value.startsWith('"') || !value.endsWith('"'))
+    return value;
+  return value.slice(1, -1);
+}
+function trimOWS2(s) {
+  let start = 0;
+  let end = s.length;
+  while (start < end) {
+    const c = s.charCodeAt(start);
+    if (c !== 32 && c !== 9)
+      break;
+    start++;
+  }
+  while (end > start) {
+    const c = s.charCodeAt(end - 1);
+    if (c !== 32 && c !== 9)
+      break;
+    end--;
+  }
+  return start === 0 && end === s.length ? s : s.slice(start, end);
+}
+function parseCookies3(cookie) {
+  const cookieMap = /* @__PURE__ */ new Map;
+  if (cookie.length < 2)
+    return cookieMap;
+  for (const chunk of cookie.split(";")) {
+    const eq = chunk.indexOf("=");
+    if (eq === -1)
+      continue;
+    const key = trimOWS2(chunk.slice(0, eq));
+    const val = unquoteCookieValue2(trimOWS2(chunk.slice(eq + 1)));
+    if (cookieNameRegex2.test(key) && cookieValueRegex2.test(val))
+      cookieMap.set(key, tryDecode3(val));
+  }
+  return cookieMap;
+}
+
+// ../../node_modules/.bun/better-auth@1.6.25+2fe26eff1b02ee55/node_modules/better-auth/dist/cookies/index.mjs
+init_base64();
+init_binary();
+init_hmac2();
+var getSessionCookie = (request, config4) => {
+  const cookies = (request instanceof Headers || !("headers" in request) ? request : request.headers).get("cookie");
+  if (!cookies)
+    return null;
+  const { cookieName = "session_token", cookiePrefix = "better-auth" } = config4 || {};
+  const parsedCookie = parseCookies3(cookies);
+  const getCookie = (name3) => parsedCookie.get(`__Secure-${name3}`) ?? parsedCookie.get(name3);
+  const sessionToken = getCookie(`${cookiePrefix}.${cookieName}`) || getCookie(`${cookiePrefix}-${cookieName}`);
+  if (sessionToken)
+    return sessionToken;
+  return null;
+};
+
 // ../../node_modules/.bun/better-auth@1.6.25+2fe26eff1b02ee55/node_modules/better-auth/dist/api/index.mjs
 init_error2();
 init_dist3();
@@ -293441,6 +293508,9 @@ async function resolveRequestSession(req) {
   if (existing)
     return existing;
   const headers = fromNodeHeaders(req.headers);
+  if (!headers.has(API_KEY_HEADER) && getSessionCookie(headers, { cookiePrefix: AUTH_COOKIE_PREFIX }) === null) {
+    return null;
+  }
   const lookup = auth.api.getSession({ headers }).catch(async () => {
     await new Promise((resolve2) => setTimeout(resolve2, 120));
     return auth.api.getSession({ headers });
