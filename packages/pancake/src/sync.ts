@@ -1,4 +1,5 @@
 import type { Db, PancakeShopModel } from "@crm/db";
+import { lockIdempotencyKey } from "@crm/db/idempotency";
 import {
 	PancakeApiError,
 	PancakeClient,
@@ -205,7 +206,7 @@ export async function syncShop(
 		});
 		assertLiveAllowed(fresh);
 		const run = await db.$transaction(async (tx) => {
-			await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))`;
+			await lockIdempotencyKey(tx, lock);
 			const active = await tx.pancakeSyncRun.findFirst({
 				where: {
 					shopId: shop.id,
