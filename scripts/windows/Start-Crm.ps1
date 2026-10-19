@@ -52,10 +52,7 @@ try {
   $processFile = Join-Path $logFolder 'processes.json'
   $recorded = @()
   if (Test-Path -LiteralPath $processFile) { $recorded = Get-Content -LiteralPath $processFile -Raw | ConvertFrom-Json }
-  $definitions = @(
-    @{Name='api';Port=$config.ApiPort;Binary=$bunBinary;Arguments=@(('"{0}"' -f $apiEntry));Directory=(Join-Path $crmRoot 'apps\api');Expected=$apiEntry},
-    @{Name='app';Port=$config.AppPort;Binary=$nodeBinary;Arguments=@(('"{0}"' -f $nextBinary),$nextMode,'--hostname','127.0.0.1','--port',[string]$config.AppPort);Directory=(Join-Path $crmRoot 'apps\app');Expected=$nextBinary}
-  )
+  $definitions = @()
   if (-not $Demo -and $runtimeState.liveSyncEnabled) {
     $workerEntry = Join-Path $crmRoot 'apps\pancake-sync\src\main.ts'
     $definitions += @{Name='pancake-worker';Port=0;Binary=$bunBinary;Arguments=@(('"{0}"' -f $workerEntry));Directory=$crmRoot;Expected=$workerEntry}
@@ -130,7 +127,7 @@ try {
   } while ([DateTime]::UtcNow -lt $startupDeadline)
   if (-not $ready) { throw 'CRM startup times out. Inspect .logs.' }
   if (-not $Demo -and -not $runtimeState.liveSyncEnabled) { Write-Output 'Pancake live sync is disabled by configuration. No worker is started.' }
-  Write-Output "CRM is ready on http://localhost:$($config.AppPort). API uses port $($config.ApiPort)."
+  Write-Output "Pancake worker is running. Local API and app are not started."
 } catch {
   Add-Content -LiteralPath (Join-Path $logFolder 'startup-error.log') -Value ("{0} {1}" -f [DateTime]::UtcNow.ToString('o'), ($_.Exception.Message + " " + $_.ScriptStackTrace))
   Write-Output $_.Exception.Message
