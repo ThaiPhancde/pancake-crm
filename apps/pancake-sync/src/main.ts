@@ -77,7 +77,7 @@ async function main() {
 						event: "shop_failed",
 						shopId: shop.id,
 						errorCode: safeErrorCode(
-							error instanceof PancakeApiError ? error : null,
+							error instanceof Error ? error : undefined,
 						),
 						message:
 							error instanceof Error

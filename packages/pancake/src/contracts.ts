@@ -42,7 +42,7 @@ export const customerWire = z
 		gender: nullableText,
 		tags: z.array(z.string()).nullish(),
 		order_count: z.number().int().nonnegative().nullish(),
-		purchased_amount: money.nullish(),
+		purchased_amount: z.number().finite().nullish(),
 		conversation_link: nullableText,
 		pages_customers: z
 			.array(

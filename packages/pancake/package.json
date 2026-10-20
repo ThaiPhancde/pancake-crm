@@ -9,6 +9,7 @@
 		"./client": "./src/client.ts",
 		"./store": "./src/store.ts",
 		"./sync": "./src/sync.ts",
+		"./errors": "./src/errors.ts",
 		"./queries": "./src/queries.ts",
 		"./access": "./src/access.ts",
 		"./webhook": "./src/webhook.ts",
@@ -22,7 +23,7 @@
 	},
 	"scripts": {
 		"check-types": "tsc --noEmit",
-		"test": "bun test test/client.spec.ts test/policy.spec.ts test/phase2.spec.ts",
+		"test": "bun test test/client.spec.ts test/policy.spec.ts test/phase2.spec.ts test/errors.spec.ts",
 		"test:integration": "bun test test/integration.spec.ts",
 		"lint": "biome check ."
 	},

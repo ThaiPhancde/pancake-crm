@@ -1,5 +1,6 @@
 import type { Db, PancakeShopModel, Prisma } from "@crm/db";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
+import { z } from "zod";
 import {
 	PancakeApiError,
 	PancakeClient,
@@ -7,6 +8,7 @@ import {
 	pageComplete,
 } from "./client";
 import { assertCrmDatabase, PANCAKE, RESOURCES, type Resource } from "./config";
+import { classifyFailure, logSync, withDbRetry, zodDetail } from "./errors";
 import { changedRecords, storeOrders, storeRecord } from "./store";
 
 export function assertLiveAllowed(
@@ -25,7 +27,19 @@ export function assertLiveAllowed(
 	}
 }
 
-async function storePage(
+const idOnly = z.looseObject({
+	id: z.union([z.string(), z.number()]).optional(),
+	user_id: z.union([z.string(), z.number()]).optional(),
+});
+
+function recordId(record: Prisma.InputJsonValue): string | undefined {
+	const parsed = idOnly.safeParse(record);
+	if (!parsed.success) return undefined;
+	const id = parsed.data.id ?? parsed.data.user_id;
+	return id === undefined ? undefined : String(id);
+}
+
+export async function storePage(
 	tx: Prisma.TransactionClient,
 	shopId: string,
 	resource: Resource,
@@ -39,8 +53,21 @@ async function storePage(
 	}
 	if (resource === "orders") return storeOrders(tx, shopId, records, fetchedAt);
 	let written = 0;
-	for (const record of records)
-		if (await storeRecord(tx, shopId, resource, record, fetchedAt)) written++;
+	for (const record of records) {
+		try {
+			if (await storeRecord(tx, shopId, resource, record, fetchedAt)) written++;
+		} catch (error) {
+			if (!(error instanceof z.ZodError)) throw error;
+			logSync({
+				event: "record_skipped",
+				shopId,
+				resource,
+				recordId: recordId(record),
+				code: "PAYLOAD_INVALID",
+				detail: zodDetail(error),
+			});
+		}
+	}
 	return written;
 }
 
@@ -122,35 +149,43 @@ export async function syncResource(
 			page.data,
 			fetchedAt,
 		);
-		const committed = await db.$transaction(
-			async (tx) => {
-				const written = await storePage(tx, shopId, resource, fresh, fetchedAt);
-				const advanced = await tx.pancakeSyncCursor.updateMany({
-					where: {
+		const committed = await withDbRetry(() =>
+			db.$transaction(
+				async (tx) => {
+					const written = await storePage(
+						tx,
 						shopId,
 						resource,
-						nextPage: cursor.nextPage,
-						windowEnd: end,
-					},
-					data: complete
-						? {
-								phase: "incremental",
-								nextPage: 1,
-								watermark: end,
-								windowStart: null,
-								windowEnd: null,
-								lastFullScanAt:
-									cursor.phase !== "incremental" ? end : undefined,
-							}
-						: { nextPage: cursor.nextPage + 1 },
-				});
-				if (advanced.count !== 1) throw new PancakeApiError("CURSOR_MOVED");
-				const next = await tx.pancakeSyncCursor.findUniqueOrThrow({
-					where: key,
-				});
-				return { next, written };
-			},
-			{ timeout: PANCAKE.transactionMs },
+						fresh,
+						fetchedAt,
+					);
+					const advanced = await tx.pancakeSyncCursor.updateMany({
+						where: {
+							shopId,
+							resource,
+							nextPage: cursor.nextPage,
+							windowEnd: end,
+						},
+						data: complete
+							? {
+									phase: "incremental",
+									nextPage: 1,
+									watermark: end,
+									windowStart: null,
+									windowEnd: null,
+									lastFullScanAt:
+										cursor.phase !== "incremental" ? end : undefined,
+								}
+							: { nextPage: cursor.nextPage + 1 },
+					});
+					if (advanced.count !== 1) throw new PancakeApiError("CURSOR_MOVED");
+					const next = await tx.pancakeSyncCursor.findUniqueOrThrow({
+						where: key,
+					});
+					return { next, written };
+				},
+				{ timeout: PANCAKE.transactionMs },
+			),
 		);
 		pages++;
 		records += committed.written;
@@ -190,11 +225,11 @@ export async function syncRecent(
 			page.data,
 			fetchedAt,
 		);
-		const written = await db.$transaction(
-			async (tx) => {
-				return storePage(tx, shopId, resource, fresh, fetchedAt);
-			},
-			{ timeout: PANCAKE.transactionMs },
+		const written = await withDbRetry(() =>
+			db.$transaction(
+				async (tx) => storePage(tx, shopId, resource, fresh, fetchedAt),
+				{ timeout: PANCAKE.transactionMs },
+			),
 		);
 		pages++;
 		records += written;
@@ -296,6 +331,16 @@ export async function syncShop(
 						data: { status: "complete", completedAt: new Date() },
 					});
 			} catch (error) {
+				const failure = classifyFailure(
+					error instanceof Error ? error : undefined,
+				);
+				logSync({
+					event: "resource_failed",
+					shopId: shop.id,
+					resource,
+					code: failure.code,
+					detail: failure.detail,
+				});
 				for (const job of jobs)
 					await db.pancakeWebhookJob.update({
 						where: { id: job.id },
@@ -305,9 +350,7 @@ export async function syncShop(
 								job.attempts + 1 >= PANCAKE.webhookMaxAttempts
 									? "dead"
 									: "pending",
-							lastError: safeErrorCode(
-								error instanceof PancakeApiError ? error : null,
-							),
+							lastError: failure.code,
 							dueAt: new Date(
 								Date.now() +
 									Math.min(
@@ -319,9 +362,7 @@ export async function syncShop(
 					});
 				if (error instanceof PancakeApiError && error.code === "HTTP_429")
 					throw error;
-				failures.push(
-					`${resource}:${safeErrorCode(error instanceof PancakeApiError ? error : null)}`,
-				);
+				failures.push(`${resource}:${failure.code}`);
 			}
 		}
 		await db.$transaction([
@@ -354,9 +395,7 @@ export async function syncShop(
 			errorCode: failures.length ? failures.join(",") : undefined,
 		};
 	} catch (error) {
-		const errorCode = safeErrorCode(
-			error instanceof PancakeApiError ? error : null,
-		);
+		const errorCode = safeErrorCode(error instanceof Error ? error : undefined);
 		await db.pancakeShop.update({
 			where: { id: shop.id },
 			data: { lastError: errorCode },
@@ -379,6 +418,6 @@ export async function syncShop(
 	}
 }
 
-export function safeErrorCode(error: PancakeApiError | null): string {
-	return error?.code ?? "PAYLOAD_OR_DATABASE_ERROR";
+export function safeErrorCode(error: Error | undefined): string {
+	return classifyFailure(error).code;
 }
