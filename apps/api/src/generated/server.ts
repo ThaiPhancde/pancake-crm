@@ -29,7 +29,7 @@ import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOut
 import { notificationListInput, notificationShopInput, markReadInput, markAllReadInput, automationListInput, createAutomationInput, updateAutomationInput, toggleAutomationInput, automationRefInput } from "@crm/pancake/notifications";
 import { updateSettingsInput, copySettingsInput, revenueTargetsInput, setRevenueTargetInput, updatePreferenceInput, savedFilterListInput, createSavedFilterInput, savedFilterRefInput, setDefaultSavedFilterInput } from "@crm/pancake/settings";
 import { branchInput, updateBranchInput, branchRefInput, branchMembersInput, profileInput, updateProfileInput, profileRefInput, assignProfileInput, historyListInput, historyExportInput } from "@crm/pancake/admin";
-import { listInput, customerDetailInput, businessReportInput, roleInput, approveEmployeeInput, recordListInput, createLeadInput, createAppointmentInput, createTicketInput, createNoteInput, updateLeadInput, updateAppointmentInput, updateTicketInput, reportInput, recordRefInput, bulkUpdateInput } from "@crm/pancake/contracts";
+import { listInput, contactCountsInput, customerDetailInput, businessReportInput, roleInput, approveEmployeeInput, recordListInput, createLeadInput, createAppointmentInput, createTicketInput, createNoteInput, updateLeadInput, updateAppointmentInput, updateTicketInput, reportInput, recordRefInput, bulkUpdateInput } from "@crm/pancake/contracts";
 import { taskListInput, createTaskInput, updateTaskInput } from "@crm/pancake/tasks";
 import { searchInput } from "@crm/pancake/insights";
 import { exportInput } from "@crm/pancake/exports";
@@ -711,6 +711,9 @@ const appRouter = t.router({
     customers: publicProcedure
       .input(listInput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["customers"]>>),
+    contactCounts: publicProcedure
+      .input(contactCountsInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["contactCounts"]>>),
     customerDetail: publicProcedure
       .input(customerDetailInput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["customerDetail"]>>),

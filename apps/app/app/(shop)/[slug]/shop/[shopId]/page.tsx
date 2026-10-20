@@ -172,36 +172,45 @@ async function Home({
 					() => null,
 				)
 			: null;
-	const [overview, report, customers, tasks, leads, tickets, appointments] =
-		await Promise.all([
-			ctx.api.overview.query(scopedInput),
-			ctx.api.report.query(scopedInput),
-			ctx.api.customers.query({ ...scopedInput, pageSize: 1 }),
-			ctx.api.tasks.query({
-				...filter.input,
-				taskView: view === "personal" && taskTab === "open" ? "mine" : taskTab,
-				pageSize: 8,
-			}),
-			ctx.api.leads.query({
-				shopId: ctx.shopId,
-				assigneeId: personalAssignee,
-				pageSize: 1,
-			}),
-			ctx.api.tickets.query({
-				shopId: ctx.shopId,
-				assigneeId: personalAssignee,
-				pageSize: 1,
-			}),
-			view === "personal"
-				? ctx.api.appointments.query({
-						shopId: ctx.shopId,
-						assigneeId: personalAssignee,
-						from: week.from,
-						to: week.to,
-						pageSize: PANCAKE.maxListSize,
-					})
-				: null,
-		]);
+	const [
+		overview,
+		report,
+		customers,
+		contactCounts,
+		tasks,
+		leads,
+		tickets,
+		appointments,
+	] = await Promise.all([
+		ctx.api.overview.query(scopedInput),
+		ctx.api.report.query(scopedInput),
+		ctx.api.customers.query({ ...scopedInput, pageSize: 1 }),
+		ctx.api.contactCounts.query({ shopId: ctx.shopId }),
+		ctx.api.tasks.query({
+			...filter.input,
+			taskView: view === "personal" && taskTab === "open" ? "mine" : taskTab,
+			pageSize: 8,
+		}),
+		ctx.api.leads.query({
+			shopId: ctx.shopId,
+			assigneeId: personalAssignee,
+			pageSize: 1,
+		}),
+		ctx.api.tickets.query({
+			shopId: ctx.shopId,
+			assigneeId: personalAssignee,
+			pageSize: 1,
+		}),
+		view === "personal"
+			? ctx.api.appointments.query({
+					shopId: ctx.shopId,
+					assigneeId: personalAssignee,
+					from: week.from,
+					to: week.to,
+					pageSize: PANCAKE.maxListSize,
+				})
+			: null,
+	]);
 	const goal = await goalRequest;
 	const today = rangeBounds("today", new Date(), filter.timeZone).from;
 	const events = (appointments?.rows ?? []).map((item) => {
@@ -220,6 +229,7 @@ async function Home({
 	const currency = report.seriesCurrency;
 	const revenueText = formatAmounts(report.revenue, shopCurrency);
 	const receivedText = `Đã thu: ${formatAmounts(report.receivedRevenue, currency)}`;
+	const contactBreakdown = `Hôm nay ${contactCounts.day.toLocaleString("vi-VN")} · Tuần này ${contactCounts.week.toLocaleString("vi-VN")} · Tháng này ${contactCounts.month.toLocaleString("vi-VN")}`;
 	const rate = report.orders
 		? Math.round((100 * report.delivered) / report.orders)
 		: 0;
@@ -275,6 +285,7 @@ async function Home({
 									<Tile
 										label="Liên hệ mới"
 										value={customers.total}
+										sub={contactBreakdown}
 										emoji="👥"
 									/>
 									<Tile
@@ -416,7 +427,11 @@ async function Home({
 							<div className="grid gap-3 sm:grid-cols-2">
 								{[
 									{ label: "Tiềm năng mới", value: leads.total },
-									{ label: "Liên hệ mới", value: customers.total },
+									{
+										label: "Liên hệ mới",
+										value: customers.total,
+										sub: contactBreakdown,
+									},
 									{
 										label: "Doanh thu cá nhân",
 										value: revenueText,

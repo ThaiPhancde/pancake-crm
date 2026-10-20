@@ -95,13 +95,25 @@ async function Contacts({
 		}
 	}
 
-	const [customers, sellers, activeDetail, saved] = await Promise.all([
-		ctx.api.customers.query(filter.input),
-		sellersQuery,
-		detailQuery,
-		loadSavedFilters(ctx.shopId, "contacts"),
-	]);
+	const [customers, contactCounts, sellers, activeDetail, saved] =
+		await Promise.all([
+			ctx.api.customers.query(filter.input),
+			ctx.api.contactCounts.query({ shopId: ctx.shopId }),
+			sellersQuery,
+			detailQuery,
+			loadSavedFilters(ctx.shopId, "contacts"),
+		]);
 	const detailStaff = staffOf(sellers);
+	const rangeSelected = Boolean(filter.input.from || filter.input.to);
+	const newContacts = rangeSelected
+		? customers.summary.newContacts
+		: contactCounts.month;
+	const newContactsDelta =
+		rangeSelected && customers.summary.previousNewContacts !== null
+			? customers.summary.newContacts - customers.summary.previousNewContacts
+			: null;
+	const n = (value: number) => value.toLocaleString("vi-VN");
+	const newContactsLabel = `${rangeSelected ? "Trong khoảng đã chọn" : "Tháng này"} · Hôm nay ${n(contactCounts.day)} · Tuần này ${n(contactCounts.week)} · Tháng này ${n(contactCounts.month)}`;
 	const staff = detailStaff.users;
 	const collection = COLLECTIONS.contact;
 	const columns = collection.fields
@@ -187,14 +199,20 @@ async function Contacts({
 							<span className="font-semibold text-xs">Số liên hệ mới</span>
 							<div className="flex items-baseline justify-between">
 								<span className="font-bold text-2xl tabular-nums">
-									{customers.summary.newContacts.toLocaleString("en-US")}
+									{newContacts.toLocaleString("en-US")}
 								</span>
-								<Badge variant="green" className="text-[11px]">
-									↑ 100%
-								</Badge>
+								{newContactsDelta === null ? null : (
+									<Badge
+										variant={newContactsDelta >= 0 ? "green" : "red"}
+										className="text-[11px]"
+									>
+										{newContactsDelta >= 0 ? "+" : ""}
+										{newContactsDelta.toLocaleString("en-US")} so với kỳ trước
+									</Badge>
+								)}
 							</div>
 							<span className="text-muted-foreground text-[11px]">
-								Đồng bộ từ Pancake POS
+								{newContactsLabel}
 							</span>
 						</div>
 						<div className="flex flex-col justify-between gap-2 rounded-lg border bg-card p-4">
@@ -206,9 +224,6 @@ async function Contacts({
 										customers.summary.currency,
 									)}
 								</span>
-								<Badge variant="green" className="text-[11px]">
-									↑ 100%
-								</Badge>
 							</div>
 							<span className="text-muted-foreground text-[11px]">
 								Đơn {customers.summary.spendWindowDays} ngày gần nhất, trừ đơn

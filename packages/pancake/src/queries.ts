@@ -483,6 +483,56 @@ export function customerScope(
 	};
 }
 
+function previousPeriod(
+	from?: string,
+	to?: string,
+): Prisma.DateTimeFilter | undefined {
+	if (!from || !to) return undefined;
+	const start = new Date(from).getTime();
+	const span = new Date(to).getTime() - start;
+	if (!(span > 0)) return undefined;
+	return { gte: new Date(start - span), lt: new Date(start) };
+}
+
+export function contactPeriodBounds(now: Date, timeZone: string) {
+	const today = zonedDay(now, timeZone);
+	return {
+		day: zonedMidnight(today, timeZone),
+		week: weekStart(now, timeZone),
+		month: zonedMidnight(`${today.slice(0, 7)}-01`, timeZone),
+	};
+}
+
+export async function newContactCounts(
+	db: Db,
+	userId: string,
+	input: { shopId?: string },
+) {
+	const grants = await shopGrants(db, userId);
+	const shopIds = input.shopId
+		? [input.shopId]
+		: grants.map((grant) => grant.shopId);
+	const now = new Date();
+	const totals = { day: 0, week: 0, month: 0 };
+	for (const shopId of shopIds) {
+		const scope = customerScope(grants, shopId);
+		const bounds = contactPeriodBounds(now, await shopTimezoneOf(db, shopId));
+		const since = (from: Date) =>
+			db.pancakeCustomer.count({
+				where: { AND: [scope, { sourceCreatedAt: { gte: from } }] },
+			});
+		const [day, week, month] = await Promise.all([
+			since(bounds.day),
+			since(bounds.week),
+			since(bounds.month),
+		]);
+		totals.day += day;
+		totals.week += week;
+		totals.month += month;
+	}
+	return totals;
+}
+
 export async function listCustomers(db: Db, userId: string, input: ListInput) {
 	const grants = await shopGrants(db, userId);
 	const oScope = orderScope(grants, input.shopId);
@@ -491,70 +541,78 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 		: grants;
 	const created = dateRange(input.from, input.to);
 	const now = new Date();
+	const filters: Prisma.PancakeCustomerWhereInput[] = [
+		customerScope(grants, input.shopId),
+		inListOrNone(
+			input.sellerId,
+			(ids) => ({ assignedEmployeeId: { in: ids } }),
+			{ assignedEmployeeId: null },
+		),
+		input.q
+			? {
+					OR: [
+						{ name: { contains: input.q, mode: "insensitive" } },
+						{ phone: { contains: input.q } },
+						{ email: { contains: input.q, mode: "insensitive" } },
+					],
+				}
+			: {},
+	];
 	const where: Prisma.PancakeCustomerWhereInput = {
-		AND: [
-			customerScope(grants, input.shopId),
-			inListOrNone(
-				input.sellerId,
-				(ids) => ({ assignedEmployeeId: { in: ids } }),
-				{ assignedEmployeeId: null },
-			),
-			input.q
-				? {
-						OR: [
-							{ name: { contains: input.q, mode: "insensitive" } },
-							{ phone: { contains: input.q } },
-							{ email: { contains: input.q, mode: "insensitive" } },
-						],
-					}
-				: {},
-		],
+		AND: [...filters, created ? { sourceCreatedAt: created } : {}],
 	};
+	const previousRange = previousPeriod(input.from, input.to);
 	const home = await homeCurrencies(
 		db,
 		selected.map((grant) => grant.shopId),
 	);
 	const homeSet = new Set(home.values());
-	const [rows, total, orderStats, repeatGroups] = await Promise.all([
-		db.pancakeCustomer.findMany({
-			where,
-			select: {
-				shopId: true,
-				customerId: true,
-				name: true,
-				phone: true,
-				email: true,
-				assignedEmployeeId: true,
-				sourceUpdatedAt: true,
-				fetchedAt: true,
-				raw: true,
-			},
-			orderBy: [
-				{ sourceUpdatedAt: "desc" },
-				{ name: "asc" },
-				{ customerId: "asc" },
-			],
-			skip: (input.page - 1) * input.pageSize,
-			take: input.pageSize,
-		}),
-		db.pancakeCustomer.count({ where }),
-		db.pancakeOrder.groupBy({
-			by: ["currency"],
-			where: { AND: [oScope, recentSpendWhere(now)] },
-			_sum: { totalPrice: true },
-		}),
-		db.pancakeOrder.groupBy({
-			by: ["customerPhone"],
-			where: {
-				AND: [
-					oScope,
-					{ customerPhone: { not: null } },
-					created ? { sourceCreatedAt: created } : {},
+	const [rows, total, previousNewContacts, orderStats, repeatGroups] =
+		await Promise.all([
+			db.pancakeCustomer.findMany({
+				where,
+				select: {
+					shopId: true,
+					customerId: true,
+					name: true,
+					phone: true,
+					email: true,
+					assignedEmployeeId: true,
+					sourceUpdatedAt: true,
+					fetchedAt: true,
+					raw: true,
+				},
+				orderBy: [
+					{ sourceUpdatedAt: "desc" },
+					{ name: "asc" },
+					{ customerId: "asc" },
 				],
-			},
-			_count: { _all: true },
-		}),
-	]);
+				skip: (input.page - 1) * input.pageSize,
+				take: input.pageSize,
+			}),
+			db.pancakeCustomer.count({ where }),
+			previousRange
+				? db.pancakeCustomer.count({
+						where: { AND: [...filters, { sourceCreatedAt: previousRange }] },
+					})
+				: Promise.resolve(null),
+			db.pancakeOrder.groupBy({
+				by: ["currency"],
+				where: { AND: [oScope, recentSpendWhere(now)] },
+				_sum: { totalPrice: true },
+			}),
+			db.pancakeOrder.groupBy({
+				by: ["customerPhone"],
+				where: {
+					AND: [
+						oScope,
+						{ customerPhone: { not: null } },
+						created ? { sourceCreatedAt: created } : {},
+					],
+				},
+				_count: { _all: true },
+			}),
+		]);
 	const staff = await db.pancakeEmployee.findMany({
 		where: {
 			shopId: { in: selected.map((grant) => grant.shopId) },
@@ -663,6 +721,7 @@ export async function listCustomers(db: Db, userId: string, input: ListInput) {
 		total,
 		summary: {
 			newContacts: total,
+			previousNewContacts,
 			totalSpent: spendAmounts(
 				orderStats.filter((group) => homeSet.has(group.currency)),
 			),

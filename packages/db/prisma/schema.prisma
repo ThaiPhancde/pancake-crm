@@ -130,6 +130,7 @@ model PancakeCustomer {
   phone              String?
   email              String?
   assignedEmployeeId String?
+  sourceCreatedAt    DateTime?
   sourceUpdatedAt    DateTime?
   fetchedAt          DateTime
   raw                Json
@@ -139,6 +140,7 @@ model PancakeCustomer {
   @@id([shopId, customerId])
   @@index([shopId, name])
   @@index([shopId, phone])
+  @@index([shopId, sourceCreatedAt])
   @@map("pancakeCustomer")
 }
 

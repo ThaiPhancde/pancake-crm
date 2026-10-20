@@ -28,6 +28,7 @@ import type {
 	approveEmployeeInput,
 	bulkUpdateInput,
 	businessReportInput,
+	contactCountsInput,
 	createAppointmentInput,
 	createLeadInput,
 	createNoteInput,
@@ -94,6 +95,7 @@ import {
 	listProducts,
 	listTickets,
 	membershipOptions,
+	newContactCounts,
 	operationsOverview,
 	orderDetail,
 	pauseShop,
@@ -162,6 +164,9 @@ export class PancakeService {
 	constructor(@InjectDatabase() private readonly db: Db) {}
 	orders(userId: string, input: z.infer<typeof listInput>) {
 		return this.authorize(() => listOrders(this.db, userId, input));
+	}
+	contactCounts(userId: string, input: z.infer<typeof contactCountsInput>) {
+		return this.authorize(() => newContactCounts(this.db, userId, input));
 	}
 	customers(userId: string, input: z.infer<typeof listInput>) {
 		return this.authorize(() => listCustomers(this.db, userId, input));

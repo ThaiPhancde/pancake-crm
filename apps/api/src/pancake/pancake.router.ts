@@ -2,6 +2,7 @@ import {
 	approveEmployeeInput,
 	bulkUpdateInput,
 	businessReportInput,
+	contactCountsInput,
 	createAppointmentInput,
 	createLeadInput,
 	createNoteInput,
@@ -103,6 +104,13 @@ export class PancakeRouter {
 		@Input() input: z.infer<typeof listInput>,
 	) {
 		return this.pancake.customers(ctx.user.id, input);
+	}
+	@Query({ input: contactCountsInput })
+	contactCounts(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof contactCountsInput>,
+	) {
+		return this.pancake.contactCounts(ctx.user.id, input);
 	}
 	@Query({ input: customerDetailInput })
 	customerDetail(

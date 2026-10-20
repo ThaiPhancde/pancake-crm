@@ -23,7 +23,7 @@
 	},
 	"scripts": {
 		"check-types": "tsc --noEmit",
-		"test": "bun test test/client.spec.ts test/policy.spec.ts test/phase2.spec.ts test/errors.spec.ts",
+		"test": "bun test test/client.spec.ts test/policy.spec.ts test/phase2.spec.ts test/errors.spec.ts test/contacts.spec.ts",
 		"test:integration": "bun test test/integration.spec.ts",
 		"lint": "biome check ."
 	},

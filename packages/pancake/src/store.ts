@@ -32,6 +32,7 @@ export async function storeRecord(
 			phone: item.phone_numbers?.[0] ?? null,
 			email: item.emails?.[0] ?? null,
 			assignedEmployeeId: item.assigned_user_id ?? null,
+			sourceCreatedAt: item.inserted_at ? sourceDate(item.inserted_at) : null,
 			sourceUpdatedAt: updated,
 			fetchedAt,
 			raw: value,

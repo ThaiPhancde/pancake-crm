@@ -262,6 +262,9 @@ export const shopConfig = z.object({
 		.optional(),
 });
 export const shopsConfig = z.array(shopConfig);
+export const contactCountsInput = z.object({
+	shopId: z.string().min(1).optional(),
+});
 export const listInput = z
 	.object({
 		view: z
