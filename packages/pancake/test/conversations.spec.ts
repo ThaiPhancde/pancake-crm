@@ -187,20 +187,30 @@ type CustomerRow = {
 	raw: unknown;
 };
 
+type ConnectionRow = {
+	shopId: string;
+	encryptedUserToken: string | null;
+	tokenMasked: string | null;
+	status: string;
+	lastVerifiedAt: Date | null;
+	lastError: string | null;
+	discoveredCount: number;
+	updatedById: string | null;
+};
+
+type CursorUpdateInput = Partial<
+	Omit<CursorRow, "syncedConversations" | "syncedMessages">
+> & {
+	syncedConversations?: number | { increment: number };
+	syncedMessages?: number | { increment: number };
+};
+
+type ConversationUpdateInput = Partial<Omit<ConversationRow, "messageCount">> & {
+	messageCount?: number | { increment: number };
+};
+
 function createFakeDb() {
-	const connections = new Map<
-		string,
-		{
-			shopId: string;
-			encryptedUserToken: string | null;
-			tokenMasked: string | null;
-			status: string;
-			lastVerifiedAt: Date | null;
-			lastError: string | null;
-			discoveredCount: number;
-			updatedById: string | null;
-		}
-	>();
+	const connections = new Map<string, ConnectionRow>();
 	const pages = new Map<string, PageRow>();
 	const cursors = new Map<string, CursorRow>();
 	const conversations = new Map<string, ConversationRow>();
@@ -233,12 +243,13 @@ function createFakeDb() {
 		outbounds,
 		$queryRaw: async () => [{ locked: true }],
 		$executeRaw: async () => 1,
-		$transaction: async (arg: unknown) => {
+		$transaction: async (
+			arg: Promise<Db>[] | ((tx: Db) => Promise<void>),
+		) => {
 			if (Array.isArray(arg)) {
 				return Promise.all(arg);
 			}
-			const fn = arg as (tx: unknown) => Promise<unknown>;
-			return fn(fake);
+			return arg(fake as unknown as Db);
 		},
 		member: {
 			findUnique: async ({
@@ -308,25 +319,24 @@ function createFakeDb() {
 				update,
 			}: {
 				where: { shopId: string };
-				create: Record<string, unknown>;
-				update: Record<string, unknown>;
+				create: Partial<ConnectionRow>;
+				update: Partial<ConnectionRow>;
 			}) => {
 				const prev = connections.get(where.shopId);
-				const next = prev
+				const next: ConnectionRow = prev
 					? {
 							...prev,
-							...(update as Partial<typeof prev>),
+							...update,
 						}
 					: {
 							shopId: where.shopId,
-							encryptedUserToken:
-								(create.encryptedUserToken as string | null) ?? null,
-							tokenMasked: (create.tokenMasked as string | null) ?? null,
-							status: (create.status as string) ?? "active",
-							lastVerifiedAt: (create.lastVerifiedAt as Date | null) ?? null,
-							lastError: (create.lastError as string | null) ?? null,
-							discoveredCount: (create.discoveredCount as number) ?? 0,
-							updatedById: (create.updatedById as string | null) ?? null,
+							encryptedUserToken: create.encryptedUserToken ?? null,
+							tokenMasked: create.tokenMasked ?? null,
+							status: create.status ?? "active",
+							lastVerifiedAt: create.lastVerifiedAt ?? null,
+							lastError: create.lastError ?? null,
+							discoveredCount: create.discoveredCount ?? 0,
+							updatedById: create.updatedById ?? null,
 						};
 				connections.set(where.shopId, next);
 				return next;
@@ -611,7 +621,7 @@ function createFakeDb() {
 				data,
 			}: {
 				where: { shopId_pageId: { shopId: string; pageId: string } };
-				data: Record<string, unknown>;
+				data: CursorUpdateInput;
 			}) => {
 				const key = pageKey(
 					where.shopId_pageId.shopId,
@@ -619,26 +629,50 @@ function createFakeDb() {
 				);
 				const prev = cursors.get(key);
 				if (!prev) throw new Error("Cursor not found");
-				const next: CursorRow = { ...prev };
-				for (const [k, v] of Object.entries(data)) {
-					if (v === undefined) continue;
-					if (
-						k === "syncedConversations" &&
-						v &&
-						(v as { increment?: number }).increment !== undefined
-					) {
-						next.syncedConversations +=
-							(v as { increment: number }).increment ?? 0;
-					} else if (
-						k === "syncedMessages" &&
-						v &&
-						(v as { increment?: number }).increment !== undefined
-					) {
-						next.syncedMessages += (v as { increment: number }).increment ?? 0;
-					} else {
-						(next as Record<string, unknown>)[k] = v;
-					}
-				}
+				const syncedConvInc =
+					(data.syncedConversations as { increment?: number } | undefined)
+						?.increment ?? 0;
+				const syncedMsgInc =
+					(data.syncedMessages as { increment?: number } | undefined)
+						?.increment ?? 0;
+				const next: CursorRow = {
+					...prev,
+					phase: data.phase ?? prev.phase,
+					lastConversationId:
+						data.lastConversationId !== undefined
+							? data.lastConversationId
+							: prev.lastConversationId,
+					pendingConversationId:
+						data.pendingConversationId !== undefined
+							? data.pendingConversationId
+							: prev.pendingConversationId,
+					pendingMessageCount:
+						data.pendingMessageCount !== undefined
+							? data.pendingMessageCount
+							: prev.pendingMessageCount,
+					windowStart:
+						data.windowStart !== undefined ? data.windowStart : prev.windowStart,
+					windowEnd:
+						data.windowEnd !== undefined ? data.windowEnd : prev.windowEnd,
+					watermark:
+						data.watermark !== undefined ? data.watermark : prev.watermark,
+					importFrom:
+						data.importFrom !== undefined ? data.importFrom : prev.importFrom,
+					importUntil:
+						data.importUntil !== undefined ? data.importUntil : prev.importUntil,
+					syncedConversations: prev.syncedConversations + syncedConvInc,
+					syncedMessages: prev.syncedMessages + syncedMsgInc,
+					lastSuccessAt:
+						data.lastSuccessAt !== undefined
+							? data.lastSuccessAt
+							: prev.lastSuccessAt,
+					lastError:
+						data.lastError !== undefined ? data.lastError : prev.lastError,
+					lastErrorCode:
+						data.lastErrorCode !== undefined
+							? data.lastErrorCode
+							: prev.lastErrorCode,
+				};
 				cursors.set(key, next);
 				return next;
 			},
@@ -807,25 +841,28 @@ function createFakeDb() {
 						conversationId: string;
 					};
 				};
-				data: Record<string, unknown>;
+				data: ConversationUpdateInput;
 			}) => {
 				const k = where.shopId_pageId_conversationId;
 				const key = convKey(k.shopId, k.pageId, k.conversationId);
 				const prev = conversations.get(key);
 				if (!prev) throw new Error("Conversation not found");
-				const next: ConversationRow = { ...prev };
-				for (const [field, val] of Object.entries(data)) {
-					if (val === undefined) continue;
-					if (
-						field === "messageCount" &&
-						val &&
-						(val as { increment?: number }).increment !== undefined
-					) {
-						next.messageCount += (val as { increment: number }).increment ?? 0;
-					} else {
-						(next as Record<string, unknown>)[field] = val;
-					}
-				}
+				const msgInc =
+					(data.messageCount as { increment?: number } | undefined)?.increment ??
+					0;
+				const next: ConversationRow = {
+					...prev,
+					snippet: data.snippet !== undefined ? data.snippet : prev.snippet,
+					seen: data.seen !== undefined ? data.seen : prev.seen,
+					isReplied:
+						data.isReplied !== undefined ? data.isReplied : prev.isReplied,
+					canInbox: data.canInbox !== undefined ? data.canInbox : prev.canInbox,
+					sourceUpdatedAt:
+						data.sourceUpdatedAt !== undefined
+							? data.sourceUpdatedAt
+							: prev.sourceUpdatedAt,
+					messageCount: prev.messageCount + msgInc,
+				};
 				conversations.set(key, next);
 				return next;
 			},
@@ -997,7 +1034,7 @@ function createFakeDb() {
 						clientMessageId: string;
 					};
 				};
-				data: Record<string, unknown>;
+				data: Partial<OutboundRow>;
 			}) => {
 				const k = where.shopId_pageId_conversationId_clientMessageId;
 				const key = msgKey(
