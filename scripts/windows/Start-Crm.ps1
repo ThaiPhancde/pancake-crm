@@ -36,8 +36,10 @@ try {
     $env:PANCAKE_LIVE_SYNC_ENABLED = '0'
   } else {
     $env:PANCAKE_DEMO_MODE = '0'
-    & $bunBinary (Join-Path $crmRoot 'scripts\validate-windows.ts')
-    if ($LASTEXITCODE -ne 0) { throw 'CRM configuration validation fails.' }
+    $validation = Start-Process -FilePath $bunBinary -ArgumentList @(('"{0}"' -f (Join-Path $crmRoot 'scripts\validate-windows.ts'))) -WorkingDirectory $crmRoot -WindowStyle Hidden -PassThru
+    $null = $validation.Handle
+    if (-not $validation.WaitForExit($config.ValidationTimeoutSeconds * 1000)) { Stop-Process -Id $validation.Id -Force; throw 'CRM configuration validation times out.' }
+    if ($validation.ExitCode -ne 0) { throw 'CRM configuration validation fails.' }
     $env:NODE_ENV = if ($Production) { 'production' } else { 'development' }
   }
   Push-Location $crmRoot

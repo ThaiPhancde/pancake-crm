@@ -8,4 +8,5 @@
     TaskRetryCount = 3
     TaskTimeoutMinutes = 3
     LockTimeoutSeconds = 90
+    ValidationTimeoutSeconds = 30
 }
