@@ -43,6 +43,7 @@ import { type NavItem, SHOP_NAV } from "./nav";
 import { NotificationPanel } from "./notification-panel";
 import { shopInitial } from "./shop-profile";
 import { shopUrl } from "./url";
+import { PancakeAiChatWidget } from "@/components/pancake/ai-chat-widget";
 
 export type ShopSummary = { id: string; name: string };
 
@@ -421,6 +422,7 @@ export function ShopShell({
 				<main className="min-h-0 flex-1 overflow-y-auto p-2 md:p-3">
 					{children}
 				</main>
+				<PancakeAiChatWidget shopId={shop.id} shopName={shop.name} />
 			</div>
 		</div>
 	);

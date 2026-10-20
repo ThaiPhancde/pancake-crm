@@ -42,6 +42,7 @@ import { formatAmount as amount, formatDate as date } from "./format";
 import { OperationsPanel } from "./operations-panel";
 import { TaskCreate } from "./task-actions";
 import { TaskPanel } from "./task-panel";
+import { PancakeAiChatWidget } from "./ai-chat-widget";
 
 export type PancakeData = {
 	overview?: Awaited<ReturnType<typeof operationsOverview>>;
@@ -583,6 +584,7 @@ export function PancakeScreen({
 					</AlertDescription>
 				</Alert>
 			)}
+			<PancakeAiChatWidget shopId={typeof values.shopId === "string" ? values.shopId : undefined} />
 		</main>
 	);
 }
