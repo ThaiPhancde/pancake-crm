@@ -34,10 +34,10 @@ const TOOLS = [
 				properties: {
 					query: { type: "string", description: "Mã đơn, SĐT, tên khách, hoặc mã tracking" },
 					shopId: { type: "string", description: "Mã Shop nếu cần lọc" },
-					limit: { type: "number", description: "Số lượng đơn cần lấy (mặc định 10)" }
-				}
-			}
-		}
+					limit: { type: "number", description: "Số lượng đơn cần lấy (mặc định 10)" },
+				},
+			},
+		},
 	},
 	{
 		type: "function",
@@ -48,11 +48,11 @@ const TOOLS = [
 				type: "object",
 				properties: {
 					query: { type: "string", description: "Số điện thoại hoặc tên khách hàng" },
-					shopId: { type: "string", description: "Mã shop nếu có" }
+					shopId: { type: "string", description: "Mã shop nếu có" },
 				},
-				required: ["query"]
-			}
-		}
+				required: ["query"],
+			},
+		},
 	},
 	{
 		type: "function",
@@ -63,11 +63,11 @@ const TOOLS = [
 				type: "object",
 				properties: {
 					shopId: { type: "string", description: "Mã shop cần thống kê (bỏ trống nếu muốn xem tất cả)" },
-					days: { type: "number", description: "Số ngày phân tích (mặc định 30)" }
-				}
-			}
-		}
-	}
+					days: { type: "number", description: "Số ngày phân tích (mặc định 30)" },
+				},
+			},
+		},
+	},
 ];
 
 async function executeTool(name: string, args: any) {
@@ -77,9 +77,11 @@ async function executeTool(name: string, args: any) {
 			const where: any = {};
 			if (args.shopId) where.shopId = args.shopId;
 			if (text) {
+				const digitsOnly = text.replace(/\D/g, "");
 				where.OR = [
 					{ orderId: { contains: text, mode: "insensitive" } },
 					{ customerPhone: { contains: text } },
+					...(digitsOnly.length >= 6 ? [{ customerPhone: { contains: digitsOnly } }, { customerPhone: { contains: digitsOnly.slice(-9) } }] : []),
 					{ customerName: { contains: text, mode: "insensitive" } },
 					{ trackingCode: { contains: text, mode: "insensitive" } },
 				];
@@ -90,7 +92,16 @@ async function executeTool(name: string, args: any) {
 				orderBy: { sourceCreatedAt: "desc" },
 				include: { shop: { select: { name: true } } },
 			});
+
+			if (orders.length === 0) {
+				return {
+					found: false,
+					message: `Không tìm thấy đơn hàng nào khớp với từ khóa "${text}" trong cơ sở dữ liệu.`,
+				};
+			}
+
 			return {
+				found: true,
 				count: orders.length,
 				orders: orders.map((o) => ({
 					orderId: o.orderId,
@@ -108,10 +119,12 @@ async function executeTool(name: string, args: any) {
 
 		if (name === "get_customer_history") {
 			const text = args.query?.trim();
+			const digitsOnly = text ? text.replace(/\D/g, "") : "";
 			const where: any = {};
 			if (args.shopId) where.shopId = args.shopId;
 			where.OR = [
 				{ phone: { contains: text } },
+				...(digitsOnly.length >= 6 ? [{ phone: { contains: digitsOnly } }, { phone: { contains: digitsOnly.slice(-9) } }] : []),
 				{ name: { contains: text, mode: "insensitive" } },
 			];
 			const customers = await db.pancakeCustomer.findMany({
@@ -128,35 +141,41 @@ async function executeTool(name: string, args: any) {
 			});
 
 			if (customers.length === 0) {
-				return { message: `Không tìm thấy khách hàng nào với thông tin "${text}".` };
+				return {
+					found: false,
+					message: `Không tìm thấy khách hàng nào có thông tin "${text}" trong cơ sở dữ liệu.`,
+				};
 			}
 
-			return customers.map((c) => {
-				const total = c.orders.length;
-				const success = c.orders.filter((o) => [3, 16].includes(o.status)).length;
-				const returned = c.orders.filter((o) => [4, 5, 15].includes(o.status)).length;
-				const spent = c.orders
-					.filter((o) => [3, 16].includes(o.status))
-					.reduce((acc, o) => acc + Number(o.totalPrice), 0);
+			return {
+				found: true,
+				customers: customers.map((c) => {
+					const total = c.orders.length;
+					const success = c.orders.filter((o) => [3, 16].includes(o.status)).length;
+					const returned = c.orders.filter((o) => [4, 5, 15].includes(o.status)).length;
+					const spent = c.orders
+						.filter((o) => [3, 16].includes(o.status))
+						.reduce((acc, o) => acc + Number(o.totalPrice), 0);
 
-				return {
-					name: c.name,
-					phone: c.phone,
-					shop: c.shop.name,
-					totalOrders: total,
-					successOrders: success,
-					returnedOrders: returned,
-					totalSpent: spent,
-					codRiskWarning: returned > 0 ? `Cảnh báo: Khách từng có ${returned} đơn hoàn/hủy!` : "Uy tín tốt, không có đơn hoàn.",
-					recentOrders: c.orders.slice(0, 5).map((o) => ({
-						orderId: o.orderId,
-						status: STATUS_MAP[o.status] ?? `Mã ${o.status}`,
-						price: Number(o.totalPrice),
-						currency: o.currency,
-						date: o.sourceCreatedAt.toISOString().split("T")[0],
-					})),
-				};
-			});
+					return {
+						name: c.name,
+						phone: c.phone,
+						shop: c.shop.name,
+						totalOrders: total,
+						successOrders: success,
+						returnedOrders: returned,
+						totalSpent: spent,
+						codRiskWarning: returned > 0 ? `Cảnh báo: Khách từng có ${returned} đơn hoàn/hủy!` : "Uy tín tốt, không có đơn hoàn.",
+						recentOrders: c.orders.slice(0, 5).map((o) => ({
+							orderId: o.orderId,
+							status: STATUS_MAP[o.status] ?? `Mã ${o.status}`,
+							price: Number(o.totalPrice),
+							currency: o.currency,
+							date: o.sourceCreatedAt.toISOString().split("T")[0],
+						})),
+					};
+				}),
+			};
 		}
 
 		if (name === "get_shop_summary") {
@@ -220,15 +239,17 @@ export async function POST(req: Request) {
 			role: "system",
 			content: `Bạn là trợ lý AI thông minh chuyên quản lý bán hàng Pancake POS cho các thị trường (UAE, Saudi, Kuwait).
 Mã Shop hiện tại đang xem: ${shopId || "Tất cả các shop"}.
-Khi người dùng hỏi về đơn hàng, vận đơn, kiểm tra khách hàng, số điện thoại, bom hàng hay doanh số, hãy TỰ ĐỘNG GỌI CÔNG CỤ (Tool) để tra cứu dữ liệu thực tế từ Database. Không bịa đặt số liệu.
-Trả lời bằng tiếng Việt lịch sự, ngắn gọn, súc tích và chính xác.`,
+Khi người dùng hỏi về đơn hàng, vận đơn, kiểm tra khách hàng, số điện thoại, bom hàng hay doanh số, hãy TỰ ĐỘNG GỌI CÔNG CỤ (Tool) để tra cứu dữ liệu thực tế từ Database.
+SAU KHI GỌI TOOL: Hãy đọc kỹ kết quả tool trả về và trả lời người dùng một cách chi tiết, cụ thể và hữu ích bằng tiếng Việt:
+- Nếu tìm thấy dữ liệu: Tóm tắt rõ ràng tên khách, số điện thoại, số đơn, trạng thái, doanh thu.
+- Nếu KHÔNG tìm thấy dữ liệu: Báo rõ cho người dùng biết là chưa có dữ liệu của số điện thoại/mã đơn này trong hệ thống của shop, và gợi ý người dùng kiểm tra lại định dạng số điện thoại. TUYỆT ĐỐI không trả lời cụt lủn hay trả lời rỗng.`,
 		};
 
 		const formattedMessages = [systemPrompt, ...messages];
 
-		// Try primary free model minimax/minimax-m3.1-flash, fallback to openai/gpt-4o-mini
-		let model = "minimax/minimax-m3.1-flash";
-		let gatewayRes = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
+		// Use openai/gpt-4o-mini as primary for reliable tool execution & clean Vietnamese synthesis
+		const model = "openai/gpt-4o-mini";
+		const gatewayRes = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${apiKey}`,
@@ -238,27 +259,9 @@ Trả lời bằng tiếng Việt lịch sự, ngắn gọn, súc tích và chí
 				model,
 				messages: formattedMessages,
 				tools: TOOLS,
-				max_tokens: 1000,
+				max_tokens: 1200,
 			}),
 		});
-
-		if (!gatewayRes.ok) {
-			// Fallback to gpt-4o-mini
-			model = "openai/gpt-4o-mini";
-			gatewayRes = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
-				method: "POST",
-				headers: {
-					Authorization: `Bearer ${apiKey}`,
-					"Content-Type": "application/json",
-				},
-				body: JSON.stringify({
-					model,
-					messages: formattedMessages,
-					tools: TOOLS,
-					max_tokens: 1000,
-				}),
-			});
-		}
 
 		const data = await gatewayRes.json();
 		if (!gatewayRes.ok) {
@@ -292,6 +295,13 @@ Trả lời bằng tiếng Việt lịch sự, ngắn gọn, súc tích và chí
 				})
 			);
 
+			// Clean assistant message for follow-up
+			const cleanAssistantMsg = {
+				role: "assistant",
+				content: choice.message.content || null,
+				tool_calls: choice.message.tool_calls,
+			};
+
 			// Call model again with tool results
 			const followUpRes = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
 				method: "POST",
@@ -301,15 +311,15 @@ Trả lời bằng tiếng Việt lịch sự, ngắn gọn, súc tích và chí
 				},
 				body: JSON.stringify({
 					model,
-					messages: [...formattedMessages, choice.message, ...toolResults],
+					messages: [...formattedMessages, cleanAssistantMsg, ...toolResults],
 					max_tokens: 1200,
 				}),
 			});
 
 			const followUpData = await followUpRes.json();
-			const finalReply = followUpData.choices?.[0]?.message?.content || "Đã xử lý xong dữ liệu.";
+			const finalReply = followUpData.choices?.[0]?.message?.content;
 			return NextResponse.json({
-				reply: finalReply,
+				reply: finalReply || "Đã kiểm tra xong nhưng không nhận được nội dung trả về từ AI.",
 				modelUsed: model,
 				toolsCalled: toolCalls.map((c: any) => c.function.name),
 			});
