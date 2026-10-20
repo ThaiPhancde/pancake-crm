@@ -4,6 +4,20 @@ import { PancakeApiError } from "@crm/pancake/client";
 import { assertCrmDatabase, PANCAKE } from "@crm/pancake/config";
 import { safeErrorCode, syncShop } from "@crm/pancake/sync";
 
+async function withWatchdog<T>(shopId: string, work: Promise<T>): Promise<T> {
+	const timer = setTimeout(() => {
+		process.stderr.write(
+			`${JSON.stringify({ shopId, errorCode: "SYNC_STALLED" })}\n`,
+		);
+		process.exit(1);
+	}, PANCAKE.shopSyncTimeoutMs);
+	try {
+		return await work;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 let stopping = false;
 const retryAt = new Map<string, number>();
 process.on("SIGINT", () => {
@@ -42,7 +56,7 @@ async function main() {
 			if (stopping) break;
 			if ((retryAt.get(shop.id) ?? 0) > Date.now()) continue;
 			try {
-				const result = await syncShop(db, shop);
+				const result = await withWatchdog(shop.id, syncShop(db, shop));
 				process.stdout.write(
 					`${JSON.stringify({ shopId: shop.id, ...result })}\n`,
 				);

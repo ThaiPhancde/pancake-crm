@@ -22,6 +22,7 @@ export const PANCAKE = {
 	transactionMs: 600_000,
 	syncLeaseMs: 900_000,
 	workerRestartCode: "WORKER_RESTART",
+	shopSyncTimeoutMs: 20 * MINUTE_MS,
 	employeeSyncMs: 60 * MINUTE_MS,
 	orderRawDrop: ["histories"] as readonly string[],
 	webhookMaxBytes: 1_048_576,

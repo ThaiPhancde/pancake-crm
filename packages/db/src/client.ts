@@ -107,6 +107,8 @@ const createPrismaClient = () => {
 			max: isServerless ? 2 : 3,
 			idleTimeoutMillis: isServerless ? 2_000 : 5_000,
 			connectionTimeoutMillis: 15_000,
+			keepAlive: true,
+			keepAliveInitialDelayMillis: 10_000,
 		}),
 		log: logDefinitions,
 		transactionOptions: { maxWait: 10_000, timeout: 15_000 },

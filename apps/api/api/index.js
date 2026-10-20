@@ -287015,7 +287015,9 @@ var createPrismaClient = () => {
       connectionString,
       max: isServerless ? 2 : 3,
       idleTimeoutMillis: isServerless ? 2000 : 5000,
-      connectionTimeoutMillis: 15000
+      connectionTimeoutMillis: 15000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 1e4
     }),
     log: logDefinitions,
     transactionOptions: { maxWait: 1e4, timeout: 15000 }
@@ -319452,6 +319454,7 @@ var PANCAKE = {
   transactionMs: 600000,
   syncLeaseMs: 900000,
   workerRestartCode: "WORKER_RESTART",
+  shopSyncTimeoutMs: 20 * MINUTE_MS4,
   employeeSyncMs: 60 * MINUTE_MS4,
   orderRawDrop: ["histories"],
   webhookMaxBytes: 1048576,
