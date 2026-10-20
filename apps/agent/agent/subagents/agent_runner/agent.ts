@@ -37,8 +37,8 @@ export default defineAgent({
 		result: z.record(z.string(), z.unknown()).nullable(),
 	}),
 	limits: {
-		maxInputTokensPerSession: 500_000,
-		maxOutputTokensPerSession: 40_000,
+		maxInputTokensPerSession: 80_000,
+		maxOutputTokensPerSession: 4_000,
 		sessionTimeoutMs: 24 * 60 * 60 * 1000,
 	},
 });

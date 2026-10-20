@@ -8,8 +8,13 @@ import {
 export const SETTINGS_ID = "app";
 
 export const DEFAULT_AGENT_MODEL = {
-	id: "zai/glm-5.2-fast",
-	contextWindowTokens: 1_000_000,
+	id: "minimax/minimax-m3.1-flash",
+	contextWindowTokens: 1000000,
+} as const;
+
+export const EXPERT_AGENT_MODEL = {
+	id: "openai/gpt-4o",
+	contextWindowTokens: 128_000,
 } as const;
 
 export interface AgentModelSetting {

@@ -2,6 +2,7 @@ import "@crm/env/load";
 import { db } from "@crm/db";
 import { PancakeApiError } from "@crm/pancake/client";
 import { assertCrmDatabase, PANCAKE } from "@crm/pancake/config";
+import { syncShopPages } from "@crm/pancake/conversations";
 import { safeErrorCode, syncShop } from "@crm/pancake/sync";
 
 async function withWatchdog<T>(shopId: string, work: Promise<T>): Promise<T> {
@@ -83,6 +84,32 @@ async function main() {
 							error instanceof Error
 								? error.message.slice(0, PANCAKE.logMessageMax)
 								: undefined,
+					})}\n`,
+				);
+			}
+			try {
+				const pagesResult = await withWatchdog(
+					shop.id,
+					syncShopPages(db, shop.id),
+				);
+				log({
+					event: "shop_pages_synced",
+					shopId: shop.id,
+					pagesProcessed: pagesResult.pagesProcessed,
+					conversationsProcessed: pagesResult.conversationsProcessed,
+					messagesWritten: pagesResult.messagesWritten,
+					failedCount: pagesResult.outcomes.filter((o) => Boolean(o.errorCode))
+						.length,
+				});
+			} catch (error) {
+				process.stderr.write(
+					`${JSON.stringify({
+						at: new Date().toISOString(),
+						event: "shop_pages_failed",
+						shopId: shop.id,
+						errorCode: safeErrorCode(
+							error instanceof Error ? error : undefined,
+						),
 					})}\n`,
 				);
 			}

@@ -9,6 +9,7 @@ import { EmptyBox } from "@/components/shop/empty-state";
 import { loadShop, type ShopRoute } from "@/components/shop/load";
 import { type SearchValues, text, withParams } from "@/components/shop/params";
 import { UNSUPPORTED } from "@/components/shop/settings/config";
+import { PancakePagesSettings } from "@/components/shop/settings/pancake-pages-settings";
 import { Unsupported } from "@/components/shop/settings/unsupported";
 import { SettingsFrame, SettingsTabs } from "@/components/shop/settings-frame";
 import { SyncToggle } from "@/components/shop/sync-toggle";
@@ -55,26 +56,7 @@ async function Connections({
 			/>
 			<div className="flex flex-1 flex-col gap-4 p-5">
 				{tab === "pancake" ? (
-					<>
-						<div>
-							<h2 className="font-semibold text-sm">Danh sách trang Pancake</h2>
-							<p className="text-muted-foreground text-xs">
-								Dữ liệu sẽ được đồng bộ về bảng Tiềm năng
-							</p>
-						</div>
-						<EmptyBox
-							title="Chưa có page nào được kết nối!"
-							description={UNSUPPORTED.external}
-							action={
-								<Unsupported reason={UNSUPPORTED.external}>
-									<Button disabled>
-										<Icon icon={Add} data-icon="inline-start" />
-										Thêm trang
-									</Button>
-								</Unsupported>
-							}
-						/>
-					</>
+					<PancakePagesSettings shopId={shop.id} shopName={shop.name} />
 				) : null}
 				{tab === "pos" ? (
 					<>

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { PancakeApiError } from "./client";
 import { PANCAKE } from "./config";
+import { redactSecrets } from "./crypto";
 
 export type Failure = {
 	code: string;
@@ -79,9 +80,8 @@ export function logSync(
 		[key: string]: string | number | string[] | undefined;
 	},
 ) {
-	process.stderr.write(
-		`${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`,
-	);
+	const raw = JSON.stringify({ at: new Date().toISOString(), ...entry });
+	process.stderr.write(`${redactSecrets(raw)}\n`);
 }
 
 export async function withDbRetry<T>(

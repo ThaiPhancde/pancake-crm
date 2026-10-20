@@ -3,7 +3,6 @@
 import Add from "@carbon/icons-react/es/Add";
 import ArrowLeft from "@carbon/icons-react/es/ArrowLeft";
 import Calendar from "@carbon/icons-react/es/Calendar";
-import Chat from "@carbon/icons-react/es/Chat";
 import Close from "@carbon/icons-react/es/Close";
 import Document from "@carbon/icons-react/es/Document";
 import Email from "@carbon/icons-react/es/Email";
@@ -50,6 +49,7 @@ import {
 } from "@/components/pancake/format";
 import { initials } from "@/lib/initials";
 import { COLLECTIONS, type FieldOption, RECORD_DEFAULTS } from "./collections";
+import { ConversationsPanel } from "./conversations-panel";
 import { EmptyRows } from "./empty-state";
 import { orderStatusName, orderStatusTone } from "./order-status";
 import { RecordForm, RecordSheet } from "./record-sheet";
@@ -708,24 +708,13 @@ export function CustomerDetailDrawer({
 								</div>
 							</div>
 						) : (
-							<div className="flex flex-col items-center justify-center gap-3 py-12 text-center text-xs">
-								<Icon icon={Chat} className="size-8 text-muted-foreground" />
-								{detail.conversationLink ? (
-									<Button asChild size="sm" variant="outline">
-										<a
-											href={detail.conversationLink}
-											target="_blank"
-											rel="noreferrer"
-										>
-											Mở hội thoại Pancake
-										</a>
-									</Button>
-								) : (
-									<p className="text-muted-foreground">
-										Chưa có hội thoại nào được liên kết với khách hàng này.
-									</p>
-								)}
-							</div>
+							<ConversationsPanel
+								shopId={detail.shopId}
+								base={base}
+								customerId={detail.customerId}
+								fallbackLink={detail.conversationLink}
+								compact
+							/>
 						)}
 					</div>
 				</SheetContent>
@@ -1097,24 +1086,13 @@ export function CustomerDetailFullView({
 							)}
 						</>
 					) : (
-						<div className="flex flex-1 flex-col items-center justify-center gap-3 text-center text-xs">
-							<Icon icon={Chat} className="size-8 text-muted-foreground" />
-							{detail.conversationLink ? (
-								<Button asChild size="sm" variant="outline">
-									<a
-										href={detail.conversationLink}
-										target="_blank"
-										rel="noreferrer"
-									>
-										Mở hội thoại Pancake
-									</a>
-								</Button>
-							) : (
-								<span className="text-muted-foreground">
-									Chưa có hội thoại trực tuyến
-								</span>
-							)}
-						</div>
+						<ConversationsPanel
+							shopId={detail.shopId}
+							base={base}
+							customerId={detail.customerId}
+							fallbackLink={detail.conversationLink}
+							compact
+						/>
 					)}
 				</div>
 			</aside>

@@ -19,11 +19,14 @@
 		"./exports": "./src/exports.ts",
 		"./insights": "./src/insights.ts",
 		"./notifications": "./src/notifications.ts",
-		"./settings": "./src/settings.ts"
+		"./settings": "./src/settings.ts",
+		"./crypto": "./src/crypto.ts",
+		"./pages-client": "./src/pages-client.ts",
+		"./conversations": "./src/conversations.ts"
 	},
 	"scripts": {
 		"check-types": "tsc --noEmit",
-		"test": "bun test test/client.spec.ts test/policy.spec.ts test/phase2.spec.ts test/errors.spec.ts test/contacts.spec.ts",
+		"test": "bun test test/client.spec.ts test/policy.spec.ts test/phase2.spec.ts test/errors.spec.ts test/contacts.spec.ts test/conversations.spec.ts",
 		"test:integration": "bun test test/integration.spec.ts",
 		"lint": "biome check ."
 	},

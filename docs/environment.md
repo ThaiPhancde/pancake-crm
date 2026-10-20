@@ -203,6 +203,28 @@ is sent. No client is constructed, so there is no queue waiting to flush later.
 - Declared in `env.validation.ts` as optional, like everything else here. Every
   event and the never-sent list are in **`docs/telemetry.md`**.
 
+## Pancake POS & Pages Conversations
+
+Pancake integration separates POS shop synchronization (`https://pos.pages.fm/api/v1`) from Pages & Conversations synchronization (`https://pages.fm/api/v1` and `https://pages.fm/api/public_api/v1` / `v2`):
+
+| Variable | Purpose |
+| --- | --- |
+| `PANCAKE_USER_ACCESS_TOKEN` | Default Pancake User Access Token (`access_token`) used to list accessible Pages (`GET /pages`) and generate a `page_access_token` when explicitly confirmed by a shop manager (`POST /pages/generate_page_access_token`). Falls back to `PANCAKE_TOKEN` if unset; can also be overridden per workspace in Settings → Connections → Pancake. |
+| `PANCAKE_TOKEN_ENCRYPTION_KEY` | 32-byte key (64 hex chars, 32+ ASCII chars, or base64) used for AES-256-GCM encryption at rest of `PancakeAccountConnection.encryptedUserToken` and `PancakePage.encryptedAccessToken`. Falls back to a SHA-256 derivation of `BETTER_AUTH_SECRET` in local development. |
+| `PANCAKE_PAGE_WEBHOOK_TOKEN` | Shared token (min 16 chars) verifying `POST /api/integrations/pancake/webhook/page/:shopId` and `POST /api/integrations/pancake/webhook/page` via `x-pancake-webhook-token` header or `Authorization: Bearer <token>`. Falls back to `PANCAKE_WEBHOOK_TOKEN` when unset. |
+| `PANCAKE_SYNC_ENABLED` | Set to `"true"` alongside `PANCAKE_LIVE_SYNC_APPROVED="I_UNDERSTAND_LIVE_READ_ONLY_SYNC"` to enable background polling in `apps/pancake-sync`. |
+
+### Worker & Webhook Deployment
+
+- **Background Worker (`apps/pancake-sync`)**:
+  - Run one pass: `bun run --cwd apps/pancake-sync sync:once`
+  - Continuous daemon (`PANCAKE.pollIntervalMs = 60s`): `bun run --cwd apps/pancake-sync start`
+  - For each shop (`1635200759`, `1328205216`, `1635200270`), the worker acquires a PostgreSQL advisory lock (`pg_try_advisory_lock`), syncs POS resources (`syncShop`), and then runs `syncShopPages` with bounded concurrency (`pageSyncConcurrency = 3`), per-page token-bucket rate limiting (`<= 5 req/page/sec`), HTTP 429 retry/backoff, and resumable checkpoints (`PancakePageSyncCursor`).
+- **Non-Destructive Webhook Endpoints**:
+  - Per-workspace: `POST /api/integrations/pancake/webhook/page/:shopId`
+  - Auto-routed by `page_id`: `POST /api/integrations/pancake/webhook/page`
+  - Does **not** overwrite existing company webhooks on Pancake; events are deduplicated via `PancakePageWebhookEvent` (`request_id` / payload hash) and out-of-order events (`version`) are ignored while incremental polling reconciles any missed updates.
+
 ## Not env vars
 
 - **Cache TTL** — `DEFAULT_TTL_MS` (60s) in `cache.module.ts`; `CACHE_TTL_MS` overrides.

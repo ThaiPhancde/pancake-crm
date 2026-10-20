@@ -42,7 +42,32 @@ import type {
 	updateLeadInput,
 	updateTicketInput,
 } from "@crm/pancake/contracts";
+import {
+	type bulkAssignPagesInput,
+	bulkAssignPages,
+	type configurePageSyncInput,
+	configurePageSync,
+	type confirmGeneratePageTokenInput,
+	confirmGeneratePageToken,
+	type connectUserTokenInput,
+	connectAndDiscoverPages,
+	type conversationListInput,
+	type conversationMessagesInput,
+	conversationMessages,
+	listConversations,
+	listWorkspacePages,
+	type markConversationSeenInput,
+	markConversationSeen,
+	type pagesListInput,
+	type sendConversationMessageInput,
+	sendConversationMessage,
+	type setPageManualTokenInput,
+	setPageManualToken,
+	type syncPagesNowInput,
+	syncPagesNow,
+} from "@crm/pancake/conversations";
 import { type ExportInput, exportCsv } from "@crm/pancake/exports";
+import { PancakePagesApiError } from "@crm/pancake/pages-client";
 import {
 	bulkUpdate,
 	convertLead,
@@ -507,6 +532,69 @@ export class PancakeService {
 	archiveAutomation(userId: string, input: z.infer<typeof automationRefInput>) {
 		return this.authorize(() => archiveAutomation(this.db, userId, input));
 	}
+	connectPagesAccount(
+		userId: string,
+		input: z.infer<typeof connectUserTokenInput>,
+	) {
+		return this.authorize(() =>
+			connectAndDiscoverPages(this.db, userId, input),
+		);
+	}
+	pages(userId: string, input: z.infer<typeof pagesListInput>) {
+		return this.authorize(() => listWorkspacePages(this.db, userId, input));
+	}
+	bulkAssignPages(
+		userId: string,
+		input: z.infer<typeof bulkAssignPagesInput>,
+	) {
+		return this.authorize(() => bulkAssignPages(this.db, userId, input));
+	}
+	configurePageSync(
+		userId: string,
+		input: z.infer<typeof configurePageSyncInput>,
+	) {
+		return this.authorize(() => configurePageSync(this.db, userId, input));
+	}
+	setPageManualToken(
+		userId: string,
+		input: z.infer<typeof setPageManualTokenInput>,
+	) {
+		return this.authorize(() => setPageManualToken(this.db, userId, input));
+	}
+	confirmGeneratePageToken(
+		userId: string,
+		input: z.infer<typeof confirmGeneratePageTokenInput>,
+	) {
+		return this.authorize(() =>
+			confirmGeneratePageToken(this.db, userId, input),
+		);
+	}
+	syncPagesNow(userId: string, input: z.infer<typeof syncPagesNowInput>) {
+		return this.authorize(() => syncPagesNow(this.db, userId, input));
+	}
+	conversations(userId: string, input: z.infer<typeof conversationListInput>) {
+		return this.authorize(() => listConversations(this.db, userId, input));
+	}
+	conversationMessages(
+		userId: string,
+		input: z.infer<typeof conversationMessagesInput>,
+	) {
+		return this.authorize(() => conversationMessages(this.db, userId, input));
+	}
+	sendConversationMessage(
+		userId: string,
+		input: z.infer<typeof sendConversationMessageInput>,
+	) {
+		return this.authorize(() =>
+			sendConversationMessage(this.db, userId, input),
+		);
+	}
+	markConversationSeen(
+		userId: string,
+		input: z.infer<typeof markConversationSeenInput>,
+	) {
+		return this.authorize(() => markConversationSeen(this.db, userId, input));
+	}
 	private recordEvent(
 		userId: string,
 		entity: "lead" | "appointment" | "ticket",
@@ -558,6 +646,14 @@ export class PancakeService {
 				);
 			if (error instanceof PancakeAccessError)
 				throw new ForbiddenException(error.message);
+			if (error instanceof PancakePagesApiError) {
+				if (
+					error.code === "PERMISSION_DENIED" ||
+					error.code === "TOKEN_EXPIRED_OR_REVOKED"
+				)
+					throw new ForbiddenException(error.message);
+				throw new BadRequestException(error.message);
+			}
 			if (error instanceof PancakeSavedFilterLimit)
 				throw new BadRequestException("Đã đạt số bộ lọc tối đa.");
 			if (error instanceof PancakeAutomationInvalid)

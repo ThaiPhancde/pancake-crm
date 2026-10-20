@@ -142,6 +142,18 @@ export class EnvironmentVariables {
 	@IsOptional()
 	@IsString()
 	PANCAKE_DEMO_MODE?: string;
+
+	@IsOptional()
+	@IsString()
+	PANCAKE_USER_ACCESS_TOKEN?: string;
+
+	@IsOptional()
+	@IsString()
+	PANCAKE_TOKEN?: string;
+
+	@IsOptional()
+	@IsString()
+	PANCAKE_TOKEN_ENCRYPTION_KEY?: string;
 }
 
 export type RawEnvironment = Record<string, string | undefined>;

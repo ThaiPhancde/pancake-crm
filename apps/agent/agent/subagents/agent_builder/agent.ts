@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
+import { EXPERT_AGENT_MODEL } from "@crm/db/settings";
 import { defineAgent, defineDynamic } from "eve";
 import { z } from "zod";
 import { selectedModel } from "../../lib/model";
@@ -7,7 +7,7 @@ export default defineAgent({
 	description:
 		"Turn one private CRM builder-chat request into a validated, reviewable team-agent version without deploying it.",
 	model: defineDynamic({
-		fallback: DEFAULT_AGENT_MODEL.id,
+		fallback: EXPERT_AGENT_MODEL.id,
 		events: { "session.started": () => selectedModel() },
 	}),
 	outputSchema: z.object({
@@ -17,8 +17,8 @@ export default defineAgent({
 		versionId: z.string().min(1),
 	}),
 	limits: {
-		maxInputTokensPerSession: 100_000,
-		maxOutputTokensPerSession: 10_000,
+		maxInputTokensPerSession: 60_000,
+		maxOutputTokensPerSession: 4_000,
 		sessionTimeoutMs: 24 * 60 * 60 * 1000,
 	},
 });

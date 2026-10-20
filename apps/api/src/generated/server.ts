@@ -29,6 +29,7 @@ import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOut
 import { notificationListInput, notificationShopInput, markReadInput, markAllReadInput, automationListInput, createAutomationInput, updateAutomationInput, toggleAutomationInput, automationRefInput } from "@crm/pancake/notifications";
 import { updateSettingsInput, copySettingsInput, revenueTargetsInput, setRevenueTargetInput, updatePreferenceInput, savedFilterListInput, createSavedFilterInput, savedFilterRefInput, setDefaultSavedFilterInput } from "@crm/pancake/settings";
 import { branchInput, updateBranchInput, branchRefInput, branchMembersInput, profileInput, updateProfileInput, profileRefInput, assignProfileInput, historyListInput, historyExportInput } from "@crm/pancake/admin";
+import { connectUserTokenInput, pagesListInput, bulkAssignPagesInput, configurePageSyncInput, setPageManualTokenInput, confirmGeneratePageTokenInput, syncPagesNowInput, pancakeConversationListInput, conversationMessagesInput, sendConversationMessageInput, markConversationSeenInput } from "@crm/pancake/conversations";
 import { listInput, contactCountsInput, customerDetailInput, businessReportInput, roleInput, approveEmployeeInput, recordListInput, createLeadInput, createAppointmentInput, createTicketInput, createNoteInput, updateLeadInput, updateAppointmentInput, updateTicketInput, reportInput, recordRefInput, bulkUpdateInput } from "@crm/pancake/contracts";
 import { taskListInput, createTaskInput, updateTaskInput } from "@crm/pancake/tasks";
 import { searchInput } from "@crm/pancake/insights";
@@ -684,7 +685,28 @@ const appRouter = t.router({
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["history"]>>),
     exportHistory: publicProcedure
       .input(historyExportInput)
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["exportHistory"]>>)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["exportHistory"]>>),
+    connectPagesAccount: publicProcedure
+      .input(connectUserTokenInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["connectPagesAccount"]>>),
+    pages: publicProcedure
+      .input(pagesListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["pages"]>>),
+    bulkAssignPages: publicProcedure
+      .input(bulkAssignPagesInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["bulkAssignPages"]>>),
+    configurePageSync: publicProcedure
+      .input(configurePageSyncInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["configurePageSync"]>>),
+    setPageManualToken: publicProcedure
+      .input(setPageManualTokenInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["setPageManualToken"]>>),
+    confirmGeneratePageToken: publicProcedure
+      .input(confirmGeneratePageTokenInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["confirmGeneratePageToken"]>>),
+    syncPagesNow: publicProcedure
+      .input(syncPagesNowInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeSettingsRouter["syncPagesNow"]>>)
     }),
   pancake: t.router({
     overview: publicProcedure
@@ -812,7 +834,19 @@ const appRouter = t.router({
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["customerReport"]>>),
     taskReport: publicProcedure
       .input(reportInput)
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["taskReport"]>>)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["taskReport"]>>),
+    conversations: publicProcedure
+      .input(pancakeConversationListInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["conversations"]>>),
+    conversationMessages: publicProcedure
+      .input(conversationMessagesInput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["conversationMessages"]>>),
+    sendConversationMessage: publicProcedure
+      .input(sendConversationMessageInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["sendConversationMessage"]>>),
+    markConversationSeen: publicProcedure
+      .input(markConversationSeenInput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as unknown as Awaited<ReturnType<PancakeRouter["markConversationSeen"]>>)
     }),
   savedViews: t.router({
     list: publicProcedure

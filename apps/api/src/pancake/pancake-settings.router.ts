@@ -11,6 +11,15 @@ import {
 	updateProfileInput,
 } from "@crm/pancake/admin";
 import {
+	bulkAssignPagesInput,
+	configurePageSyncInput,
+	confirmGeneratePageTokenInput,
+	connectUserTokenInput,
+	pagesListInput,
+	setPageManualTokenInput,
+	syncPagesNowInput,
+} from "@crm/pancake/conversations";
+import {
 	copySettingsInput,
 	createSavedFilterInput,
 	revenueTargetsInput,
@@ -203,5 +212,54 @@ export class PancakeSettingsRouter {
 		@Input() input: z.infer<typeof historyExportInput>,
 	) {
 		return this.pancake.exportHistory(ctx.user.id, input);
+	}
+	@Mutation({ input: connectUserTokenInput })
+	connectPagesAccount(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof connectUserTokenInput>,
+	) {
+		return this.pancake.connectPagesAccount(ctx.user.id, input);
+	}
+	@Query({ input: pagesListInput })
+	pages(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof pagesListInput>,
+	) {
+		return this.pancake.pages(ctx.user.id, input);
+	}
+	@Mutation({ input: bulkAssignPagesInput })
+	bulkAssignPages(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof bulkAssignPagesInput>,
+	) {
+		return this.pancake.bulkAssignPages(ctx.user.id, input);
+	}
+	@Mutation({ input: configurePageSyncInput })
+	configurePageSync(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof configurePageSyncInput>,
+	) {
+		return this.pancake.configurePageSync(ctx.user.id, input);
+	}
+	@Mutation({ input: setPageManualTokenInput })
+	setPageManualToken(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof setPageManualTokenInput>,
+	) {
+		return this.pancake.setPageManualToken(ctx.user.id, input);
+	}
+	@Mutation({ input: confirmGeneratePageTokenInput })
+	confirmGeneratePageToken(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof confirmGeneratePageTokenInput>,
+	) {
+		return this.pancake.confirmGeneratePageToken(ctx.user.id, input);
+	}
+	@Mutation({ input: syncPagesNowInput })
+	syncPagesNow(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof syncPagesNowInput>,
+	) {
+		return this.pancake.syncPagesNow(ctx.user.id, input);
 	}
 }
