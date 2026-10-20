@@ -1,0 +1,72 @@
+name: Pancake sync image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/pancake-sync/**
+      - packages/pancake/**
+      - packages/db/**
+      - packages/env/**
+      - bun.lock
+      - package.json
+      - .dockerignore
+      - .github/workflows/pancake-sync-image.yml
+  workflow_dispatch:
+
+concurrency:
+  group: pancake-sync-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: build and run on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crm
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d crm"
+          --health-interval 3s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/crm?schema=public
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build image
+        run: docker build -f apps/pancake-sync/Dockerfile -t pancake-sync:ci .
+
+      - name: Image size
+        run: docker image ls pancake-sync:ci
+
+      - name: Worker stays idle when live sync is disabled
+        run: |
+          docker run --rm --network host -e DATABASE_URL pancake-sync:ci | tee disabled.log
+          grep -q "Pancake worker is disabled" disabled.log
+
+      - name: Apply migrations from the image
+        run: docker run --rm --network host -e DATABASE_URL pancake-sync:ci bun run --cwd packages/db db:deploy
+
+      - name: Worker completes one pass against Postgres
+        run: |
+          docker run --rm --network host -e DATABASE_URL -e PANCAKE_LIVE_SYNC_ENABLED=1 pancake-sync:ci bun apps/pancake-sync/src/main.ts --once | tee once.log
+          grep -q '"event":"worker_started"' once.log
+          grep -q '"event":"cycle_started"' once.log
+
+      - name: Status check reads the database
+        run: docker run --rm --network host -e DATABASE_URL pancake-sync:ci bun apps/pancake-sync/src/status.ts

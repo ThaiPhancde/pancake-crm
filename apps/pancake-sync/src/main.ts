@@ -18,6 +18,14 @@ async function withWatchdog<T>(shopId: string, work: Promise<T>): Promise<T> {
 	}
 }
 
+type LogValue = string | number | boolean | null | undefined;
+
+function log(entry: { event: string; [key: string]: LogValue }) {
+	process.stdout.write(
+		`${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`,
+	);
+}
+
 let stopping = false;
 const retryAt = new Map<string, number>();
 process.on("SIGINT", () => {
@@ -43,6 +51,7 @@ async function main() {
 			finishedAt: new Date(),
 		},
 	});
+	log({ event: "worker_started", pollMs: PANCAKE.pollMs });
 	do {
 		const shops = await db.pancakeShop.findMany({
 			where: {
@@ -52,19 +61,29 @@ async function main() {
 			},
 			orderBy: { id: "asc" },
 		});
+		log({ event: "cycle_started", shops: shops.length });
 		for (const shop of shops) {
 			if (stopping) break;
 			if ((retryAt.get(shop.id) ?? 0) > Date.now()) continue;
 			try {
 				const result = await withWatchdog(shop.id, syncShop(db, shop));
-				process.stdout.write(
-					`${JSON.stringify({ shopId: shop.id, ...result })}\n`,
-				);
+				log({ event: "shop_synced", shopId: shop.id, ...result });
 			} catch (error) {
 				if (error instanceof PancakeApiError && error.retryAfterMs > 0)
 					retryAt.set(shop.id, Date.now() + error.retryAfterMs);
 				process.stderr.write(
-					`${JSON.stringify({ shopId: shop.id, errorCode: safeErrorCode(error instanceof PancakeApiError ? error : null) })}\n`,
+					`${JSON.stringify({
+						at: new Date().toISOString(),
+						event: "shop_failed",
+						shopId: shop.id,
+						errorCode: safeErrorCode(
+							error instanceof PancakeApiError ? error : null,
+						),
+						message:
+							error instanceof Error
+								? error.message.slice(0, PANCAKE.logMessageMax)
+								: undefined,
+					})}\n`,
 				);
 			}
 		}

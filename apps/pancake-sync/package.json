@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"start": "bun src/main.ts",
+		"status": "bun src/status.ts",
 		"check-types": "tsc --noEmit"
 	},
 	"dependencies": {
