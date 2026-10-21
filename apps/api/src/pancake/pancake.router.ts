@@ -18,10 +18,8 @@ import {
 	updateTicketInput,
 } from "@crm/pancake/contracts";
 import {
-	conversationMessagesInput,
-	markConversationSeenInput,
-	pancakeConversationListInput,
-	sendConversationMessageInput,
+	customerConversationInput,
+	sendCustomerMessageInput,
 } from "@crm/pancake/conversations";
 import { exportInput } from "@crm/pancake/exports";
 import { searchInput } from "@crm/pancake/insights";
@@ -348,32 +346,18 @@ export class PancakeRouter {
 	) {
 		return this.pancake.taskReport(ctx.user.id, input);
 	}
-	@Query({ input: pancakeConversationListInput })
-	conversations(
+	@Query({ input: customerConversationInput })
+	customerConversation(
 		@Ctx() ctx: AuthedTrpcContext,
-		@Input() input: z.infer<typeof pancakeConversationListInput>,
+		@Input() input: z.infer<typeof customerConversationInput>,
 	) {
-		return this.pancake.conversations(ctx.user.id, input);
+		return this.pancake.customerConversation(ctx.user.id, input);
 	}
-	@Query({ input: conversationMessagesInput })
-	conversationMessages(
+	@Mutation({ input: sendCustomerMessageInput })
+	sendCustomerMessage(
 		@Ctx() ctx: AuthedTrpcContext,
-		@Input() input: z.infer<typeof conversationMessagesInput>,
+		@Input() input: z.infer<typeof sendCustomerMessageInput>,
 	) {
-		return this.pancake.conversationMessages(ctx.user.id, input);
-	}
-	@Mutation({ input: sendConversationMessageInput })
-	sendConversationMessage(
-		@Ctx() ctx: AuthedTrpcContext,
-		@Input() input: z.infer<typeof sendConversationMessageInput>,
-	) {
-		return this.pancake.sendConversationMessage(ctx.user.id, input);
-	}
-	@Mutation({ input: markConversationSeenInput })
-	markConversationSeen(
-		@Ctx() ctx: AuthedTrpcContext,
-		@Input() input: z.infer<typeof markConversationSeenInput>,
-	) {
-		return this.pancake.markConversationSeen(ctx.user.id, input);
+		return this.pancake.sendCustomerMessage(ctx.user.id, input);
 	}
 }

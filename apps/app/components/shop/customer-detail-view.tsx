@@ -49,7 +49,7 @@ import {
 } from "@/components/pancake/format";
 import { initials } from "@/lib/initials";
 import { COLLECTIONS, type FieldOption, RECORD_DEFAULTS } from "./collections";
-import { ConversationsPanel } from "./conversations-panel";
+import { CustomerConversation } from "./customer-conversation";
 import { EmptyRows } from "./empty-state";
 import { orderStatusName, orderStatusTone } from "./order-status";
 import { RecordForm, RecordSheet } from "./record-sheet";
@@ -708,12 +708,11 @@ export function CustomerDetailDrawer({
 								</div>
 							</div>
 						) : (
-							<ConversationsPanel
+							<CustomerConversation
 								shopId={detail.shopId}
-								base={base}
 								customerId={detail.customerId}
-								fallbackLink={detail.conversationLink}
-								compact
+								canWrite={detail.canWrite}
+								base={base}
 							/>
 						)}
 					</div>
@@ -1086,12 +1085,11 @@ export function CustomerDetailFullView({
 							)}
 						</>
 					) : (
-						<ConversationsPanel
+						<CustomerConversation
 							shopId={detail.shopId}
-							base={base}
 							customerId={detail.customerId}
-							fallbackLink={detail.conversationLink}
-							compact
+							canWrite={detail.canWrite}
+							base={base}
 						/>
 					)}
 				</div>

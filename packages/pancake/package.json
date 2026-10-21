@@ -22,11 +22,12 @@
 		"./settings": "./src/settings.ts",
 		"./crypto": "./src/crypto.ts",
 		"./pages-client": "./src/pages-client.ts",
-		"./conversations": "./src/conversations.ts"
+		"./conversations": "./src/conversations.ts",
+		"./assistant": "./src/assistant.ts"
 	},
 	"scripts": {
 		"check-types": "tsc --noEmit",
-		"test": "bun test test/client.spec.ts test/policy.spec.ts test/phase2.spec.ts test/errors.spec.ts test/contacts.spec.ts test/conversations.spec.ts",
+		"test": "bun test test/client.spec.ts test/policy.spec.ts test/phase2.spec.ts test/errors.spec.ts test/contacts.spec.ts test/conversations.spec.ts test/message-text.spec.ts test/assistant.spec.ts",
 		"test:integration": "bun test test/integration.spec.ts",
 		"lint": "biome check ."
 	},

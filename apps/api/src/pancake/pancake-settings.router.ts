@@ -11,13 +11,10 @@ import {
 	updateProfileInput,
 } from "@crm/pancake/admin";
 import {
-	bulkAssignPagesInput,
-	configurePageSyncInput,
 	confirmGeneratePageTokenInput,
 	connectUserTokenInput,
 	pagesListInput,
 	setPageManualTokenInput,
-	syncPagesNowInput,
 } from "@crm/pancake/conversations";
 import {
 	copySettingsInput,
@@ -227,20 +224,6 @@ export class PancakeSettingsRouter {
 	) {
 		return this.pancake.pages(ctx.user.id, input);
 	}
-	@Mutation({ input: bulkAssignPagesInput })
-	bulkAssignPages(
-		@Ctx() ctx: AuthedTrpcContext,
-		@Input() input: z.infer<typeof bulkAssignPagesInput>,
-	) {
-		return this.pancake.bulkAssignPages(ctx.user.id, input);
-	}
-	@Mutation({ input: configurePageSyncInput })
-	configurePageSync(
-		@Ctx() ctx: AuthedTrpcContext,
-		@Input() input: z.infer<typeof configurePageSyncInput>,
-	) {
-		return this.pancake.configurePageSync(ctx.user.id, input);
-	}
 	@Mutation({ input: setPageManualTokenInput })
 	setPageManualToken(
 		@Ctx() ctx: AuthedTrpcContext,
@@ -254,12 +237,5 @@ export class PancakeSettingsRouter {
 		@Input() input: z.infer<typeof confirmGeneratePageTokenInput>,
 	) {
 		return this.pancake.confirmGeneratePageToken(ctx.user.id, input);
-	}
-	@Mutation({ input: syncPagesNowInput })
-	syncPagesNow(
-		@Ctx() ctx: AuthedTrpcContext,
-		@Input() input: z.infer<typeof syncPagesNowInput>,
-	) {
-		return this.pancake.syncPagesNow(ctx.user.id, input);
 	}
 }

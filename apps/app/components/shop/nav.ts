@@ -1,6 +1,5 @@
 import Calendar from "@carbon/icons-react/es/Calendar";
 import ChartBar from "@carbon/icons-react/es/ChartBar";
-import Chat from "@carbon/icons-react/es/Chat";
 import Home from "@carbon/icons-react/es/Home";
 import Network_3 from "@carbon/icons-react/es/Network_3";
 import Settings from "@carbon/icons-react/es/Settings";
@@ -21,7 +20,6 @@ export const SHOP_NAV: NavItem[] = [
 	{ title: "Trang chủ", href: "", icon: Home, exact: true },
 	{ title: "Tiềm năng", href: "/leads", icon: Network_3 },
 	{ title: "Liên hệ", href: "/contacts", icon: UserMultiple },
-	{ title: "Hội thoại", href: "/conversations", icon: Chat },
 	{ title: "Lịch hẹn", href: "/calendar", icon: Calendar },
 	{
 		title: "Bán hàng",

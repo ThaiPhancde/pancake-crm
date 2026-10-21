@@ -9,7 +9,6 @@
 		"pancake:demo:seed": "bun scripts/seed-pancake-demo.ts",
 		"pancake:worker": "bun apps/pancake-sync/src/main.ts",
 		"pancake:mcp": "bun apps/pancake-mcp/src/main.ts",
-		"optimize:models": "node scripts/optimize-models.js",
 		"windows:deploy": "bun scripts/deploy-windows.ts",
 		"prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
 		"build": "turbo run build",

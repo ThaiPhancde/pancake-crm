@@ -12,9 +12,9 @@ const VERSION = "v1";
 function resolveEncryptionKey(secretOverride?: string): Buffer {
 	const raw =
 		secretOverride ??
-		process.env.PANCAKE_TOKEN_ENCRYPTION_KEY ??
-		process.env.BETTER_AUTH_SECRET ??
-		"pancake-crm-local-fallback-encryption-key-32b";
+		(process.env.PANCAKE_TOKEN_ENCRYPTION_KEY ||
+			process.env.BETTER_AUTH_SECRET ||
+			"pancake-crm-local-fallback-encryption-key-32b");
 	return createHash("sha256").update(raw).digest();
 }
 
@@ -32,10 +32,7 @@ export function encryptToken(plain: string, secretOverride?: string): string {
 	return `${VERSION}:${iv.toString("hex")}:${tag.toString("hex")}:${encrypted.toString("hex")}`;
 }
 
-export function decryptToken(
-	payload: string,
-	secretOverride?: string,
-): string {
+export function decryptToken(payload: string, secretOverride?: string): string {
 	const parts = payload.split(":");
 	if (parts.length !== 4 || parts[0] !== VERSION) {
 		throw new Error("INVALID_ENCRYPTED_TOKEN");
@@ -45,11 +42,7 @@ export function decryptToken(
 		throw new Error("INVALID_ENCRYPTED_TOKEN");
 	}
 	const key = resolveEncryptionKey(secretOverride);
-	const decipher = createDecipheriv(
-		ALGORITHM,
-		key,
-		Buffer.from(ivHex, "hex"),
-	);
+	const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivHex, "hex"));
 	decipher.setAuthTag(Buffer.from(tagHex, "hex"));
 	const decrypted = Buffer.concat([
 		decipher.update(Buffer.from(cipherHex, "hex")),

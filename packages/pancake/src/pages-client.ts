@@ -108,107 +108,6 @@ const generateTokenObjectEnvelope = z
 	})
 	.passthrough();
 
-const markSeenEnvelope = z
-	.object({
-		success: z.boolean().optional(),
-	})
-	.passthrough();
-
-export const conversationCustomerWire = z
-	.object({
-		id: sourceId.optional(),
-		fb_id: z.string().nullish(),
-		customer_id: z.string().nullish(),
-		global_id: z.string().nullish(),
-		name: z.string().nullish(),
-	})
-	.passthrough();
-
-export const recentPhoneWire = z.union([
-	z.string().transform((s) => ({ phone_number: s, captured: null })),
-	z
-		.object({
-			phone_number: z.string().nullish(),
-			captured: z.string().nullish(),
-		})
-		.passthrough(),
-]);
-
-export const conversationTagWire = z
-	.union([
-		z.number(),
-		z.string(),
-		z
-			.object({
-				id: z.union([z.number(), z.string()]).nullish(),
-				text: z.string().nullish(),
-				color: z.string().nullish(),
-			})
-			.passthrough(),
-	])
-	.nullable();
-
-export const conversationWire = z
-	.object({
-		id: sourceId,
-		type: z.string().nullish(),
-		page_id: sourceId.nullish(),
-		post_id: z.string().nullish(),
-		snippet: z.string().nullish(),
-		seen: z.boolean().nullish(),
-		is_replied: z.boolean().nullish(),
-		message_count: z.number().int().nonnegative().nullish(),
-		has_phone: z.boolean().nullish(),
-		inserted_at: z.string().nullish(),
-		updated_at: z.string().nullish(),
-		version: z.number().int().nullish(),
-		customer_id: z.string().nullish(),
-		from: z
-			.object({
-				id: sourceId.nullish(),
-				name: z.string().nullish(),
-				email: z.string().nullish(),
-			})
-			.passthrough()
-			.nullish(),
-		last_sent_by: z
-			.object({
-				id: sourceId.nullish(),
-				name: z.string().nullish(),
-				uid: z.string().nullish(),
-				admin_id: z.string().nullish(),
-				admin_name: z.string().nullish(),
-			})
-			.passthrough()
-			.nullish(),
-		tags: z.array(conversationTagWire).nullish(),
-		assignee_ids: z.array(sourceId).nullish(),
-		customers: z.array(conversationCustomerWire).nullish(),
-		recent_phone_numbers: z.array(recentPhoneWire).nullish(),
-		page_customer: z
-			.object({
-				id: sourceId.nullish(),
-				name: z.string().nullish(),
-				customer_id: z.string().nullish(),
-				psid: z.string().nullish(),
-				global_id: z.string().nullish(),
-			})
-			.passthrough()
-			.nullish(),
-	})
-	.passthrough();
-
-export type IncomingConversation = z.infer<typeof conversationWire>;
-
-const conversationsEnvelope = z
-	.object({
-		success: z.boolean().optional(),
-		conversations: z.array(conversationWire).optional(),
-		message: z.string().optional(),
-		error_code: z.union([z.string(), z.number()]).optional(),
-	})
-	.passthrough();
-
 export const messageAttachmentWire = z
 	.object({
 		id: sourceId.nullish(),
@@ -270,54 +169,16 @@ export const messageWire = z
 			.passthrough()
 			.nullish(),
 		attachments: z.array(messageAttachmentWire).nullish(),
-		phone_info: z.array(recentPhoneWire).nullish(),
 	})
 	.passthrough();
 
 export type IncomingMessage = z.infer<typeof messageWire>;
 
-export const messageCustomerDetailWire = z
-	.object({
-		id: sourceId.nullish(),
-		customer_id: z.string().nullish(),
-		fb_id: z.string().nullish(),
-		global_id: z.string().nullish(),
-		name: z.string().nullish(),
-		can_inbox: z.boolean().nullish(),
-		recent_phone_numbers: z.array(recentPhoneWire).nullish(),
-		shop_customer_addresses: z
-			.array(
-				z
-					.object({
-						phone_number: z.string().nullish(),
-						full_name: z.string().nullish(),
-						full_address: z.string().nullish(),
-					})
-					.passthrough(),
-			)
-			.nullish(),
-	})
-	.passthrough();
-
 const messagesEnvelope = z
 	.object({
 		success: z.boolean().optional(),
-		conversation_id: sourceId.nullish(),
 		messages: z.array(messageWire).optional(),
-		customers: z.array(messageCustomerDetailWire).nullish(),
-		conv_customers: z.array(conversationCustomerWire).nullish(),
-		conv_from: z
-			.object({
-				id: sourceId.nullish(),
-				name: z.string().nullish(),
-				email: z.string().nullish(),
-			})
-			.passthrough()
-			.nullish(),
 		can_inbox: z.boolean().nullish(),
-		recent_phone_numbers: z.array(recentPhoneWire).nullish(),
-		conv_phone_numbers: z.array(recentPhoneWire).nullish(),
-		conv_recent_phone_numbers: z.array(recentPhoneWire).nullish(),
 		message: z.string().optional(),
 		error_code: z.union([z.string(), z.number()]).optional(),
 	})
@@ -325,15 +186,7 @@ const messagesEnvelope = z
 
 export type MessagesPageResult = {
 	messages: IncomingMessage[];
-	customers: z.infer<typeof messageCustomerDetailWire>[];
-	convCustomers: z.infer<typeof conversationCustomerWire>[];
-	convFrom: {
-		id?: string | null;
-		name?: string | null;
-		email?: string | null;
-	} | null;
 	canInbox: boolean;
-	phones: string[];
 };
 
 const sendMessageEnvelope = z
@@ -362,26 +215,12 @@ export type SendMessageResult = {
 	errorMessage: string | null;
 };
 
-export type ListConversationsOptions = {
-	lastConversationId?: string;
-	since?: number;
-	until?: number;
-	orderBy?: "inserted_at" | "updated_at";
-	unreadFirst?: boolean;
-	types?: string[];
-};
-
 export interface PancakePagesAdapter {
 	listPages(userAccessToken: string): Promise<DiscoveredPage[]>;
 	generatePageAccessToken(
 		userAccessToken: string,
 		pageId: string,
 	): Promise<string>;
-	listConversations(
-		pageId: string,
-		pageAccessToken: string,
-		options?: ListConversationsOptions,
-	): Promise<IncomingConversation[]>;
 	listMessages(
 		pageId: string,
 		conversationId: string,
@@ -394,12 +233,6 @@ export interface PancakePagesAdapter {
 		pageAccessToken: string,
 		payload: SendMessageRequest,
 	): Promise<SendMessageResult>;
-	markSeen(
-		pageId: string,
-		conversationId: string,
-		pageAccessToken: string,
-		seen: boolean,
-	): Promise<boolean>;
 }
 
 const TOKEN_ERROR_PATTERNS = [
@@ -446,18 +279,6 @@ function classifyApiErrorBody(
 	}
 	if (status === 429) return "HTTP_429";
 	return status >= 400 ? `HTTP_${status}` : "INVALID_API_RESPONSE";
-}
-
-export function extractPhones(
-	items: readonly z.infer<typeof recentPhoneWire>[] | null | undefined,
-): string[] {
-	if (!items?.length) return [];
-	const result: string[] = [];
-	for (const item of items) {
-		const val = item.phone_number ?? item.captured;
-		if (val?.trim()) result.push(val.trim());
-	}
-	return [...new Set(result)];
 }
 
 function scrubRawPage(item: DiscoveredPageRaw): DiscoveredPageRaw {
@@ -544,17 +365,13 @@ export class PancakePagesClient implements PancakePagesAdapter {
 			if (response.status === 429 || response.status >= 500) {
 				const header = response.headers.get("retry-after");
 				const retryHeaderMs = header
-					? Number(header) * 1000 || Math.max(0, Date.parse(header) - Date.now())
+					? Number(header) * 1000 ||
+						Math.max(0, Date.parse(header) - Date.now())
 					: 0;
-				const delay = Math.max(
-					this.retryBaseMs * 2 ** attempt,
-					retryHeaderMs,
-				);
+				const delay = Math.max(this.retryBaseMs * 2 ** attempt, retryHeaderMs);
 				if (attempt + 1 >= this.maxAttempts || delay > PANCAKE.maxRetryMs) {
 					throw new PancakePagesApiError(
-						response.status === 429
-							? "HTTP_429"
-							: `HTTP_${response.status}`,
+						response.status === 429 ? "HTTP_429" : `HTTP_${response.status}`,
 						response.status === 429
 							? "Vượt giới hạn tần suất gọi API Pancake (429)."
 							: `Lỗi máy chủ Pancake (HTTP ${response.status}).`,
@@ -609,7 +426,8 @@ export class PancakePagesClient implements PancakePagesAdapter {
 			);
 			throw new PancakePagesApiError(
 				code === "INVALID_API_RESPONSE" ? "TOKEN_EXPIRED_OR_REVOKED" : code,
-				parsed.data.message ?? "User Access Token không hợp lệ hoặc đã hết hạn.",
+				parsed.data.message ??
+					"User Access Token không hợp lệ hoặc đã hết hạn.",
 			);
 		}
 		const categorized = parsed.data.categorized;
@@ -714,60 +532,6 @@ export class PancakePagesClient implements PancakePagesAdapter {
 		);
 	}
 
-	async listConversations(
-		pageId: string,
-		pageAccessToken: string,
-		options: ListConversationsOptions = {},
-	): Promise<IncomingConversation[]> {
-		const token = pageAccessToken.trim();
-		if (!pageId.trim() || !token) {
-			throw new PancakePagesApiError("CONFIGURATION_REQUIRED");
-		}
-		const url = new URL(
-			`${PANCAKE.pagesPublicV2BaseUrl}/pages/${encodeURIComponent(pageId)}/conversations`,
-		);
-		url.searchParams.set("page_access_token", token);
-		if (options.lastConversationId) {
-			url.searchParams.set("last_conversation_id", options.lastConversationId);
-		}
-		if (options.since !== undefined) {
-			url.searchParams.set("since", String(Math.floor(options.since)));
-		}
-		if (options.until !== undefined) {
-			url.searchParams.set("until", String(Math.floor(options.until)));
-		}
-		if (options.orderBy) {
-			url.searchParams.set("order_by", options.orderBy);
-		}
-		if (options.unreadFirst !== undefined) {
-			url.searchParams.set("unread_first", String(options.unreadFirst));
-		}
-		if (options.types?.length) {
-			for (const t of options.types) {
-				url.searchParams.append("type[]", t);
-			}
-		}
-		const raw = await this.requestJson(`page:${pageId}`, url, {
-			method: "GET",
-		});
-		const parsed = conversationsEnvelope.safeParse(raw);
-		if (!parsed.success) {
-			throw new PancakePagesApiError("INVALID_API_RESPONSE");
-		}
-		if (parsed.data.success === false) {
-			throw new PancakePagesApiError(
-				classifyApiErrorBody(
-					401,
-					parsed.data.message ?? "Page Access Token không hợp lệ",
-					parsed.data.error_code,
-				),
-				parsed.data.message ??
-					"Page Access Token hết hạn, bị thu hồi hoặc thiếu quyền truy cập.",
-			);
-		}
-		return parsed.data.conversations ?? [];
-	}
-
 	async listMessages(
 		pageId: string,
 		conversationId: string,
@@ -803,20 +567,9 @@ export class PancakePagesClient implements PancakePagesAdapter {
 					"Page Access Token không hợp lệ hoặc không đủ quyền đọc tin nhắn.",
 			);
 		}
-		const phones = [
-			...new Set([
-				...extractPhones(parsed.data.recent_phone_numbers),
-				...extractPhones(parsed.data.conv_phone_numbers),
-				...extractPhones(parsed.data.conv_recent_phone_numbers),
-			]),
-		];
 		return {
 			messages: parsed.data.messages ?? [],
-			customers: parsed.data.customers ?? [],
-			convCustomers: parsed.data.conv_customers ?? [],
-			convFrom: parsed.data.conv_from ?? null,
 			canInbox: parsed.data.can_inbox ?? true,
-			phones,
 		};
 	}
 
@@ -869,13 +622,10 @@ export class PancakePagesClient implements PancakePagesAdapter {
 		if (!parsed.data.success) {
 			const code =
 				parsed.data.message_code ??
-				(parsed.data.error_code !== undefined &&
-				parsed.data.error_code !== null
+				(parsed.data.error_code !== undefined && parsed.data.error_code !== null
 					? String(parsed.data.error_code)
 					: "SEND_FAILED");
-			const message =
-				parsed.data.message ??
-				describeSendErrorCode(code);
+			const message = parsed.data.message ?? describeSendErrorCode(code);
 			return {
 				success: false,
 				remoteMessageId: null,
@@ -889,31 +639,6 @@ export class PancakePagesClient implements PancakePagesAdapter {
 			errorCode: null,
 			errorMessage: null,
 		};
-	}
-
-	async markSeen(
-		pageId: string,
-		conversationId: string,
-		pageAccessToken: string,
-		seen: boolean,
-	): Promise<boolean> {
-		const token = pageAccessToken.trim();
-		if (!pageId.trim() || !conversationId.trim() || !token) {
-			throw new PancakePagesApiError("CONFIGURATION_REQUIRED");
-		}
-		const endpoint = seen ? "read" : "unread";
-		const url = new URL(
-			`${PANCAKE.pagesPublicV1BaseUrl}/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(conversationId)}/${endpoint}`,
-		);
-		url.searchParams.set("page_access_token", token);
-		const raw = await this.requestJson(`page:${pageId}`, url, {
-			method: "POST",
-		});
-		const parsed = markSeenEnvelope.safeParse(raw);
-		if (parsed.success && parsed.data.success !== undefined) {
-			return parsed.data.success;
-		}
-		return true;
 	}
 }
 

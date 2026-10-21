@@ -1,6 +1,5 @@
 "use client";
 
-import CheckmarkFilled from "@carbon/icons-react/es/CheckmarkFilled";
 import Key from "@carbon/icons-react/es/Key";
 import Renew from "@carbon/icons-react/es/Renew";
 import Search from "@carbon/icons-react/es/Search";
@@ -29,15 +28,7 @@ import { formatDate } from "@/components/pancake/format";
 import { initials } from "@/lib/initials";
 import { useTRPC } from "@/lib/trpc/client";
 
-type FilterKind =
-	| "all"
-	| "assigned"
-	| "matching_shop"
-	| "has_token"
-	| "missing_token"
-	| "error";
-
-type RangePreset = "7d" | "30d" | "90d" | "custom";
+type FilterKind = "all" | "matching_shop" | "has_token" | "missing_token";
 
 type TokenDialogTarget = {
 	pageId: string;
@@ -58,6 +49,9 @@ function tokenStatusBadge(status: string) {
 	if (status === "active") {
 		return { label: "Đã có token", variant: "green" as const };
 	}
+	if (status === "invalid") {
+		return { label: "Lỗi giải mã token", variant: "red" as const };
+	}
 	if (status === "expired" || status === "revoked") {
 		return { label: "Token hết hạn / thu hồi", variant: "red" as const };
 	}
@@ -65,49 +59,6 @@ function tokenStatusBadge(status: string) {
 		return { label: "Thiếu quyền Page", variant: "orange" as const };
 	}
 	return { label: "Chưa có token", variant: "gray" as const };
-}
-
-function syncPhaseBadge(phase: string, syncEnabled: boolean, tokenStatus: string) {
-	if (tokenStatus === "expired" || tokenStatus === "revoked") {
-		return { label: "Dừng: cần kết nối lại", variant: "red" as const };
-	}
-	if (phase === "paused_auth_error") {
-		return { label: "Dừng do lỗi quyền/token", variant: "red" as const };
-	}
-	if (!syncEnabled) {
-		return { label: "Tắt đồng bộ", variant: "gray" as const };
-	}
-	if (phase === "importing") {
-		return { label: "Đang import theo đợt", variant: "blue" as const };
-	}
-	if (phase === "incremental") {
-		return { label: "Đồng bộ gia tăng", variant: "soft-green" as const };
-	}
-	return { label: "Chờ chạy", variant: "secondary" as const };
-}
-
-function computeRangeDates(
-	preset: RangePreset,
-	customFrom: string,
-	customUntil: string,
-) {
-	const now = new Date();
-	if (preset === "7d") {
-		const from = new Date(now.getTime() - 7 * 86_400_000);
-		return { importFrom: from.toISOString(), importUntil: now.toISOString() };
-	}
-	if (preset === "30d") {
-		const from = new Date(now.getTime() - 30 * 86_400_000);
-		return { importFrom: from.toISOString(), importUntil: now.toISOString() };
-	}
-	if (preset === "90d") {
-		const from = new Date(now.getTime() - 90 * 86_400_000);
-		return { importFrom: from.toISOString(), importUntil: now.toISOString() };
-	}
-	return {
-		importFrom: customFrom ? new Date(customFrom).toISOString() : null,
-		importUntil: customUntil ? new Date(customUntil).toISOString() : null,
-	};
 }
 
 export function PancakePagesSettings({
@@ -124,27 +75,17 @@ export function PancakePagesSettings({
 	const [filter, setFilter] = useState<FilterKind>("all");
 	const [pageIndex, setPageIndex] = useState(1);
 	const [userTokenInput, setUserTokenInput] = useState("");
-	const [autoAssignMatching, setAutoAssignMatching] = useState(true);
-	const [selectedIds, setSelectedIds] = useState<string[]>([]);
-	const [rangePreset, setRangePreset] = useState<RangePreset>("30d");
-	const [customFrom, setCustomFrom] = useState("");
-	const [customUntil, setCustomUntil] = useState("");
 	const [busyAction, setBusyAction] = useState<string | null>(null);
 	const [tokenModal, setTokenModal] = useState<TokenDialogTarget | null>(null);
 	const [manualPat, setManualPat] = useState("");
 	const [confirmReplaceChecked, setConfirmReplaceChecked] = useState(false);
 
 	const pagesQuery = useQuery(
-		trpc.pancakeSettings.pages.queryOptions(
-			{
-				shopId,
-				q: search,
-				filter,
-			},
-			{
-				refetchInterval: 8_000,
-			},
-		),
+		trpc.pancakeSettings.pages.queryOptions({
+			shopId,
+			q: search,
+			filter,
+		}),
 	);
 
 	const data = pagesQuery.data;
@@ -156,7 +97,6 @@ export function PancakePagesSettings({
 		(safePageIndex - 1) * pageSize,
 		safePageIndex * pageSize,
 	);
-	const selectedSet = new Set(selectedIds);
 
 	async function refreshPages() {
 		await queryClient.invalidateQueries({
@@ -177,11 +117,10 @@ export function PancakePagesSettings({
 			const res = await client.pancakeSettings.connectPagesAccount.mutate({
 				shopId,
 				userAccessToken: userTokenInput.trim() || undefined,
-				autoAssignMatchingShop: autoAssignMatching,
 			});
 			setUserTokenInput("");
 			toast.success(
-				`Đã tải ${res.discoveredCount} Page từ Pancake (${res.existingTokensSaved} Page có sẵn token, gán tự động ${res.autoAssigned} Page).`,
+				`Đã tải ${res.discoveredCount} Page từ Pancake (${res.existingTokensSaved} Page có sẵn token).`,
 			);
 			await refreshPages();
 		} catch (error) {
@@ -189,135 +128,6 @@ export function PancakePagesSettings({
 				error instanceof Error
 					? error.message
 					: "Không thể kết nối Pancake User Access Token.",
-			);
-		} finally {
-			setBusyAction(null);
-		}
-	}
-
-	function togglePageSelection(pageId: string, checked: boolean) {
-		setSelectedIds((prev) => {
-			if (checked) {
-				return prev.includes(pageId) ? prev : [...prev, pageId];
-			}
-			return prev.filter((id) => id !== pageId);
-		});
-	}
-
-	function selectAllFiltered() {
-		setSelectedIds(allFilteredPages.map((p) => p.pageId));
-	}
-
-	function selectMatchingShopPages() {
-		setSelectedIds(
-			allFilteredPages.filter((p) => p.matchesShop).map((p) => p.pageId),
-		);
-	}
-
-	function clearSelection() {
-		setSelectedIds([]);
-	}
-
-	async function handleBulkAssign(assigned: boolean) {
-		if (selectedIds.length === 0) return;
-		setBusyAction(assigned ? "assign" : "unassign");
-		try {
-			const range = computeRangeDates(rangePreset, customFrom, customUntil);
-			const client = makeClient();
-			const res = await client.pancakeSettings.bulkAssignPages.mutate({
-				shopId,
-				pageIds: selectedIds,
-				assigned,
-				syncEnabled: assigned ? true : false,
-				importFrom: assigned ? range.importFrom : undefined,
-				importUntil: assigned ? range.importUntil : undefined,
-			});
-			if (assigned) {
-				toast.success(
-					`Đã gán ${res.updatedCount} Page vào shop (${res.activeSyncCount} Page bật đồng bộ, ${res.missingTokenCount} Page chờ cấp token).`,
-				);
-			} else {
-				toast.success(`Đã bỏ gán ${res.updatedCount} Page khỏi shop.`);
-			}
-			await refreshPages();
-		} catch (error) {
-			toast.error(
-				error instanceof Error
-					? error.message
-					: "Không thể cập nhật gán Page hàng loạt.",
-			);
-		} finally {
-			setBusyAction(null);
-		}
-	}
-
-	async function handleApplySyncRange(resetCursor: boolean) {
-		const targetIds =
-			selectedIds.length > 0
-				? selectedIds
-				: allFilteredPages.filter((p) => p.assigned).map((p) => p.pageId);
-		if (targetIds.length === 0) {
-			toast.error("Hãy chọn ít nhất 1 Page để cập nhật khoảng thời gian import.");
-			return;
-		}
-		setBusyAction("range");
-		try {
-			const range = computeRangeDates(rangePreset, customFrom, customUntil);
-			const client = makeClient();
-			const res = await client.pancakeSettings.configurePageSync.mutate({
-				shopId,
-				pageIds: targetIds,
-				syncEnabled: true,
-				importFrom: range.importFrom,
-				importUntil: range.importUntil,
-				resetCursor,
-			});
-			toast.success(
-				`Đã cập nhật cấu hình khoảng thời gian import cho ${res.updatedCount} Page.`,
-			);
-			await refreshPages();
-		} catch (error) {
-			toast.error(
-				error instanceof Error
-					? error.message
-					: "Không thể cập nhật cấu hình đồng bộ.",
-			);
-		} finally {
-			setBusyAction(null);
-		}
-	}
-
-	async function handleSyncNow(targetPageIds?: string[]) {
-		setBusyAction("syncNow");
-		try {
-			const client = makeClient();
-			const res = await client.pancakeSettings.syncPagesNow.mutate({
-				shopId,
-				pageIds:
-					targetPageIds && targetPageIds.length > 0
-						? targetPageIds.slice(0, 50)
-						: selectedIds.length > 0
-							? selectedIds.slice(0, 50)
-							: undefined,
-				conversationBudget: 2,
-				messageBudget: 8,
-			});
-			const errors = res.outcomes.filter((o) => Boolean(o.errorCode));
-			if (errors.length > 0) {
-				toast.warning(
-					`Đã chạy đợt đồng bộ ${res.pagesProcessed} Page (${res.conversationsProcessed} hội thoại, ${res.messagesWritten} tin nhắn). Có ${errors.length} Page báo lỗi.`,
-				);
-			} else {
-				toast.success(
-					`Đã đồng bộ ${res.pagesProcessed} Page: ${res.conversationsProcessed} hội thoại, ${res.messagesWritten} tin nhắn.`,
-				);
-			}
-			await refreshPages();
-		} catch (error) {
-			toast.error(
-				error instanceof Error
-					? error.message
-					: "Không thể chạy đồng bộ hội thoại.",
 			);
 		} finally {
 			setBusyAction(null);
@@ -384,11 +194,6 @@ export function PancakePagesSettings({
 	const filterTabs: { value: FilterKind; label: string; count?: number }[] = [
 		{ value: "all", label: "Tất cả", count: data?.summary.total },
 		{
-			value: "assigned",
-			label: "Đã gán vào shop",
-			count: data?.summary.assigned,
-		},
-		{
 			value: "matching_shop",
 			label: `Khớp mã shop (${shopId})`,
 			count: data?.summary.matchingShop,
@@ -402,11 +207,6 @@ export function PancakePagesSettings({
 			value: "missing_token",
 			label: "Thiếu quyền / token",
 			count: data?.summary.missingToken,
-		},
-		{
-			value: "error",
-			label: "Lỗi cần xử lý",
-			count: data?.summary.errorCount,
 		},
 	];
 
@@ -431,9 +231,9 @@ export function PancakePagesSettings({
 							)}
 						</div>
 						<p className="mt-1 text-muted-foreground text-xs">
-							Tự động lấy danh sách toàn bộ Page (~485+ Page) từ Pancake User
-							Access Token, ưu tiên giữ nguyên Page Access Token hiện có và đồng
-							bộ hội thoại theo đợt.
+							Tải danh sách Page từ Pancake User Access Token và giữ Page Access
+							Token hiện có. Hội thoại không được import vào CRM: tab Hội thoại
+							của liên hệ tải trực tiếp từ Pancake khi mở.
 						</p>
 					</div>
 
@@ -455,8 +255,8 @@ export function PancakePagesSettings({
 					<div className="mt-3 flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive text-xs">
 						<Icon icon={WarningAlt} className="size-4 shrink-0" />
 						<span>
-							Lỗi xác thực User Token: {data.connection.lastError}. Vui lòng
-							cập nhật lại User Access Token (hệ thống đã dừng thử lại tự động).
+							Lỗi xác thực User Token: {data.connection.lastError}. Vui lòng cập
+							nhật lại User Access Token (hệ thống đã dừng thử lại tự động).
 						</span>
 					</div>
 				) : null}
@@ -488,71 +288,8 @@ export function PancakePagesSettings({
 								: "Kết nối & Tải danh sách Page"}
 						</Button>
 					</div>
-
-					<div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-						<label className="flex cursor-pointer items-center gap-2">
-							<Checkbox
-								checked={autoAssignMatching}
-								onCheckedChange={(v) => setAutoAssignMatching(Boolean(v))}
-							/>
-							<span>
-								Tự động gán các Page có <code>shop_id = {shopId}</code> vào
-								workspace này và giữ nguyên Page Access Token sẵn có
-							</span>
-						</label>
-						<span className="text-muted-foreground">
-							Webhook hội thoại (tùy chọn, không ghi đè webhook hiện có):{" "}
-							<code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-								/api/integrations/pancake/webhook/page/{shopId}
-							</code>
-						</span>
-					</div>
 				</form>
 			</div>
-
-			{data ? (
-				<div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-					<div className="rounded-lg border bg-card p-3 text-xs">
-						<div className="text-muted-foreground">Tổng Page phát hiện</div>
-						<div className="mt-1 font-bold text-base tabular-nums">
-							{data.summary.total}
-						</div>
-					</div>
-					<div className="rounded-lg border bg-card p-3 text-xs">
-						<div className="text-muted-foreground">Đã gán vào shop</div>
-						<div className="mt-1 font-bold text-[#1677ff] text-base tabular-nums">
-							{data.summary.assigned}{" "}
-							<span className="font-normal text-muted-foreground text-xs">
-								({data.summary.syncEnabled} bật sync)
-							</span>
-						</div>
-					</div>
-					<div className="rounded-lg border bg-card p-3 text-xs">
-						<div className="text-muted-foreground">Page đã có sẵn Token</div>
-						<div className="mt-1 font-bold text-base text-emerald-600 tabular-nums">
-							{data.summary.activeToken}
-						</div>
-					</div>
-					<div className="rounded-lg border bg-card p-3 text-xs">
-						<div className="text-muted-foreground">Thiếu quyền / Token</div>
-						<div className="mt-1 font-bold text-amber-600 text-base tabular-nums">
-							{data.summary.missingToken}
-						</div>
-					</div>
-					<div className="rounded-lg border bg-card p-3 text-xs">
-						<div className="text-muted-foreground">Hội thoại đã lưu</div>
-						<div className="mt-1 font-bold text-base tabular-nums">
-							{data.summary.totalConversations}
-						</div>
-					</div>
-					<div className="rounded-lg border bg-card p-3 text-xs">
-						<div className="text-muted-foreground">Tin nhắn đã lưu</div>
-						<div className="mt-1 font-bold text-base tabular-nums">
-							{data.summary.totalMessages}
-						</div>
-					</div>
-				</div>
-			) : null}
 
 			<div className="flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-2xs">
 				<div className="flex flex-wrap items-center justify-between gap-3">
@@ -599,144 +336,6 @@ export function PancakePagesSettings({
 					</div>
 				</div>
 
-				<div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3 text-xs">
-					<div className="flex flex-wrap items-center gap-2">
-						<span className="font-medium">
-							Đã chọn: <strong className="tabular-nums">{selectedIds.length}</strong>{" "}
-							Page
-						</span>
-						<Button
-							type="button"
-							variant="outline"
-							size="xs"
-							onClick={selectAllFiltered}
-							disabled={allFilteredPages.length === 0}
-						>
-							Chọn tất cả trong bộ lọc ({allFilteredPages.length})
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="xs"
-							onClick={selectMatchingShopPages}
-							disabled={
-								allFilteredPages.filter((p) => p.matchesShop).length === 0
-							}
-						>
-							Chọn Page khớp mã shop (
-							{allFilteredPages.filter((p) => p.matchesShop).length})
-						</Button>
-						{selectedIds.length > 0 ? (
-							<Button
-								type="button"
-								variant="ghost"
-								size="xs"
-								onClick={clearSelection}
-							>
-								Bỏ chọn
-							</Button>
-						) : null}
-					</div>
-
-					<div className="flex flex-wrap items-center gap-2">
-						<span className="text-muted-foreground">Khoảng thời gian import:</span>
-						{(
-							[
-								{ value: "7d", label: "7 ngày" },
-								{ value: "30d", label: "30 ngày" },
-								{ value: "90d", label: "90 ngày" },
-								{ value: "custom", label: "Tùy chỉnh" },
-							] as const
-						).map((preset) => (
-							<button
-								key={preset.value}
-								type="button"
-								onClick={() => setRangePreset(preset.value)}
-								className={cn(
-									"rounded border px-2 py-1 text-xs",
-									rangePreset === preset.value
-										? "border-[#1677ff] bg-[#f0f7ff] font-medium text-[#1677ff]"
-										: "bg-background text-muted-foreground",
-								)}
-							>
-								{preset.label}
-							</button>
-						))}
-						{rangePreset === "custom" ? (
-							<div className="flex items-center gap-1.5">
-								<Input
-									type="date"
-									value={customFrom}
-									onChange={(e) => setCustomFrom(e.target.value)}
-									className="h-7 w-34 text-xs"
-								/>
-								<span>→</span>
-								<Input
-									type="date"
-									value={customUntil}
-									onChange={(e) => setCustomUntil(e.target.value)}
-									className="h-7 w-34 text-xs"
-								/>
-							</div>
-						) : null}
-					</div>
-				</div>
-
-				<div className="flex flex-wrap items-center justify-between gap-2">
-					<div className="flex flex-wrap items-center gap-2">
-						<Button
-							type="button"
-							size="sm"
-							disabled={
-								selectedIds.length === 0 ||
-								busyAction !== null ||
-								!data?.canManage
-							}
-							onClick={() => handleBulkAssign(true)}
-						>
-							<Icon icon={CheckmarkFilled} data-icon="inline-start" />
-							Gán vào shop & Bật đồng bộ ({selectedIds.length})
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							disabled={
-								selectedIds.length === 0 ||
-								busyAction !== null ||
-								!data?.canManage
-							}
-							onClick={() => handleBulkAssign(false)}
-						>
-							Bỏ gán khỏi shop
-						</Button>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							disabled={busyAction !== null || !data?.canManage}
-							onClick={() => handleApplySyncRange(true)}
-						>
-							Áp dụng khoảng thời gian import
-						</Button>
-					</div>
-
-					<Button
-						type="button"
-						variant="secondary"
-						size="sm"
-						disabled={busyAction !== null || !data?.canManage}
-						onClick={() => handleSyncNow()}
-					>
-						<Icon icon={Renew} data-icon="inline-start" />
-						{busyAction === "syncNow"
-							? "Đang đồng bộ theo đợt..."
-							: selectedIds.length > 0
-								? `Chạy đồng bộ đợt cho ${selectedIds.length} Page đã chọn`
-								: "Chạy đồng bộ đợt cho các Page đã gán"}
-					</Button>
-				</div>
-
 				{pagesQuery.isLoading ? (
 					<div className="py-12 text-center text-muted-foreground text-xs">
 						Đang tải danh sách Page Pancake...
@@ -748,65 +347,31 @@ export function PancakePagesSettings({
 				) : allFilteredPages.length === 0 ? (
 					<div className="rounded-md border border-dashed py-10 text-center text-muted-foreground text-xs">
 						Chưa có Page nào khớp bộ lọc. Hãy bấm &ldquo;Kết nối & Tải danh sách
-						Page&rdquo; ở trên để tự động lấy ~485+ Page từ tài khoản Pancake.
+						Page&rdquo; ở trên để lấy Page từ tài khoản Pancake.
 					</div>
 				) : (
 					<div className="overflow-x-auto rounded-md border">
 						<table className="w-full text-left text-xs">
 							<thead>
 								<tr className="border-b bg-muted/50 text-muted-foreground">
-									<th className="w-9 p-2.5">
-										<Checkbox
-											checked={
-												visiblePages.length > 0 &&
-												visiblePages.every((p) => selectedSet.has(p.pageId))
-											}
-											onCheckedChange={(checked) => {
-												for (const p of visiblePages) {
-													togglePageSelection(p.pageId, Boolean(checked));
-												}
-											}}
-										/>
-									</th>
 									<th className="p-2.5 font-semibold">Page</th>
 									<th className="p-2.5 font-semibold">Quyền & Token</th>
-									<th className="p-2.5 font-semibold">Trạng thái đồng bộ</th>
-									<th className="p-2.5 text-right font-semibold">
-										Hội thoại / Tin nhắn
-									</th>
-									<th className="p-2.5 font-semibold">Thành công gần nhất</th>
 									<th className="p-2.5 text-right font-semibold">Thao tác</th>
 								</tr>
 							</thead>
 							<tbody className="divide-y">
 								{visiblePages.map((page) => {
 									const tokBadge = tokenStatusBadge(page.tokenStatus);
-									const phaseBadge = syncPhaseBadge(
-										page.phase,
-										page.syncEnabled,
-										page.tokenStatus,
-									);
 									return (
-										<tr
-											key={page.pageId}
-											className={cn(
-												"hover:bg-accent/20",
-												page.assigned ? "bg-[#f0f7ff]/30" : "",
-											)}
-										>
-											<td className="p-2.5 align-top">
-												<Checkbox
-													checked={selectedSet.has(page.pageId)}
-													onCheckedChange={(checked) =>
-														togglePageSelection(page.pageId, Boolean(checked))
-													}
-												/>
-											</td>
+										<tr key={page.pageId} className="hover:bg-accent/20">
 											<td className="p-2.5 align-top">
 												<div className="flex items-start gap-2.5">
 													<Avatar className="size-8 shrink-0">
 														{page.avatarUrl ? (
-															<AvatarImage src={page.avatarUrl} alt={page.name} />
+															<AvatarImage
+																src={page.avatarUrl}
+																alt={page.name}
+															/>
 														) : null}
 														<AvatarFallback>
 															{initials(page.name)}
@@ -817,9 +382,6 @@ export function PancakePagesSettings({
 															<span className="font-semibold text-foreground">
 																{page.name}
 															</span>
-															{page.assigned ? (
-																<Badge variant="blue">Đã gán</Badge>
-															) : null}
 															{page.matchesShop ? (
 																<Badge variant="soft-green">
 																	Khớp shop {shopId}
@@ -856,47 +418,6 @@ export function PancakePagesSettings({
 													</p>
 												) : null}
 											</td>
-											<td className="max-w-xs p-2.5 align-top">
-												<div className="flex flex-wrap items-center gap-1.5">
-													<Badge variant={phaseBadge.variant}>
-														{phaseBadge.label}
-													</Badge>
-													{page.connectStatus === "disconnected" ? (
-														<Badge variant="red">Mất kết nối nền tảng</Badge>
-													) : null}
-												</div>
-												{page.pendingConversationId ? (
-													<div className="mt-1 font-mono text-[11px] text-muted-foreground">
-														Checkpoint: {page.pendingConversationId} (offset{" "}
-														{page.pendingMessageCount})
-													</div>
-												) : page.lastConversationId ? (
-													<div className="mt-1 font-mono text-[11px] text-muted-foreground">
-														Cursor: {page.lastConversationId}
-													</div>
-												) : null}
-												{page.lastError ? (
-													<p className="mt-1 text-[11px] text-destructive">
-														Lỗi: {page.lastError}
-													</p>
-												) : null}
-											</td>
-											<td className="p-2.5 text-right align-top tabular-nums">
-												<div className="font-semibold">
-													{page.conversationCount} hội thoại
-												</div>
-												<div className="text-muted-foreground">
-													{page.messageCount} tin nhắn
-												</div>
-											</td>
-											<td className="p-2.5 align-top text-muted-foreground">
-												<div>{formatDate(page.lastSuccessAt)}</div>
-												{page.lastWebhookAt ? (
-													<div className="text-[11px]">
-														Webhook: {formatDate(page.lastWebhookAt)}
-													</div>
-												) : null}
-											</td>
 											<td className="p-2.5 text-right align-top">
 												<div className="flex justify-end gap-1.5">
 													<Button
@@ -920,17 +441,6 @@ export function PancakePagesSettings({
 														<Icon icon={Key} data-icon="inline-start" />
 														Token
 													</Button>
-													{page.assigned && page.tokenStatus === "active" ? (
-														<Button
-															type="button"
-															variant="secondary"
-															size="xs"
-															disabled={!data?.canManage || busyAction !== null}
-															onClick={() => handleSyncNow([page.pageId])}
-														>
-															Đồng bộ
-														</Button>
-													) : null}
 												</div>
 											</td>
 										</tr>
@@ -966,9 +476,7 @@ export function PancakePagesSettings({
 								variant="outline"
 								size="xs"
 								disabled={safePageIndex >= totalPages}
-								onClick={() =>
-									setPageIndex((p) => Math.min(totalPages, p + 1))
-								}
+								onClick={() => setPageIndex((p) => Math.min(totalPages, p + 1))}
 							>
 								Trang sau
 							</Button>
@@ -1034,8 +542,12 @@ export function PancakePagesSettings({
 							/>
 						</div>
 
-						<label className="flex cursor-pointer items-start gap-2 pt-1">
+						<label
+							htmlFor="confirm-replace-token"
+							className="flex cursor-pointer items-start gap-2 pt-1"
+						>
 							<Checkbox
+								id="confirm-replace-token"
 								checked={confirmReplaceChecked}
 								onCheckedChange={(v) => setConfirmReplaceChecked(Boolean(v))}
 							/>

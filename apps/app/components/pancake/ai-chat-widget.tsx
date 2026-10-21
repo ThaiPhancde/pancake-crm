@@ -1,24 +1,29 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import Send from "@carbon/icons-react/es/Send";
-import Close from "@carbon/icons-react/es/Close";
-import TrashCan from "@carbon/icons-react/es/TrashCan";
 import Chat from "@carbon/icons-react/es/Chat";
+import Close from "@carbon/icons-react/es/Close";
+import Send from "@carbon/icons-react/es/Send";
+import TrashCan from "@carbon/icons-react/es/TrashCan";
 import { Button } from "@crm/ui/components/button";
 import { Input } from "@crm/ui/components/input";
-import { Badge } from "@crm/ui/components/badge";
 import { cn } from "@crm/ui/lib/utils";
+import { useEffect, useRef, useState } from "react";
 
 type Message = {
 	id: string;
 	role: "user" | "assistant";
 	content: string;
-	toolsCalled?: string[];
+	local?: boolean;
 	timestamp: string;
 };
 
-export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; shopName?: string }) {
+export function PancakeAiChatWidget({
+	shopId,
+	shopName,
+}: {
+	shopId?: string;
+	shopName?: string;
+}) {
 	const [isOpen, setIsOpen] = useState(false);
 	const [input, setInput] = useState("");
 	const [loading, setLoading] = useState(false);
@@ -26,22 +31,24 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 		{
 			id: "welcome",
 			role: "assistant",
-			content: `Xin chào! Tôi là Trợ lý AI Pancake ${shopName ? `của ${shopName}` : ""}. Bạn có thể hỏi tôi tra cứu mã đơn, số điện thoại khách, kiểm tra rủi ro hoàn đơn hoặc xem doanh số!`,
-			timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+			content: `Xin chào! Tôi là Trợ lý AI Pancake${shopName ? ` của ${shopName}` : ""}. Bạn có thể hỏi mã đơn, số điện thoại khách, rủi ro hoàn đơn hoặc doanh số.`,
+			local: true,
+			timestamp: new Date().toLocaleTimeString([], {
+				hour: "2-digit",
+				minute: "2-digit",
+			}),
 		},
 	]);
 
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 
-	const scrollToBottom = () => {
-		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-	};
+	const messageCount = messages.length;
 
 	useEffect(() => {
-		if (isOpen) {
-			scrollToBottom();
+		if (isOpen && messageCount > 0) {
+			messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 		}
-	}, [messages, isOpen]);
+	}, [messageCount, isOpen]);
 
 	const handleSend = async (textToSend?: string) => {
 		const text = (textToSend || input).trim();
@@ -51,7 +58,10 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 			id: crypto.randomUUID(),
 			role: "user",
 			content: text,
-			timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+			timestamp: new Date().toLocaleTimeString([], {
+				hour: "2-digit",
+				minute: "2-digit",
+			}),
 		};
 
 		setMessages((prev) => [...prev, userMsg]);
@@ -59,10 +69,9 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 		setLoading(true);
 
 		try {
-			const chatHistory = [...messages, userMsg].map((m) => ({
-				role: m.role,
-				content: m.content,
-			}));
+			const chatHistory = [...messages, userMsg]
+				.filter((m) => !m.local)
+				.map((m) => ({ role: m.role, content: m.content }));
 
 			const res = await fetch("/api/pancake/ai-chat", {
 				method: "POST",
@@ -83,19 +92,25 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 				id: crypto.randomUUID(),
 				role: "assistant",
 				content: data.reply || "Đã xử lý xong yêu cầu của bạn.",
-				toolsCalled: data.toolsCalled,
-				timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+				timestamp: new Date().toLocaleTimeString([], {
+					hour: "2-digit",
+					minute: "2-digit",
+				}),
 			};
 
 			setMessages((prev) => [...prev, botMsg]);
-		} catch (err: any) {
+		} catch (err) {
 			setMessages((prev) => [
 				...prev,
 				{
 					id: crypto.randomUUID(),
 					role: "assistant",
-					content: `⚠️ Lỗi: ${err.message || "Có lỗi xảy ra khi xử lý yêu cầu."}`,
-					timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+					content: `Lỗi: ${err instanceof Error ? err.message : "Có lỗi xảy ra khi xử lý yêu cầu."}`,
+					local: true,
+					timestamp: new Date().toLocaleTimeString([], {
+						hour: "2-digit",
+						minute: "2-digit",
+					}),
 				},
 			]);
 		} finally {
@@ -117,12 +132,11 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 							<div>
 								<div className="flex items-center gap-1.5 font-semibold text-sm leading-tight">
 									Trợ lý AI Pancake
-									<Badge variant="secondary" className="bg-white/20 text-white text-[10px] hover:bg-white/30 border-0 py-0 px-1.5">
-										Free $0
-									</Badge>
 								</div>
 								<div className="text-white/80 text-[11px]">
-									{shopName ? `Đang kết nối: ${shopName}` : "Tra cứu tự động đơn & khách"}
+									{shopName
+										? `Đang kết nối: ${shopName}`
+										: "Tra cứu tự động đơn & khách"}
 								</div>
 							</div>
 						</div>
@@ -136,8 +150,13 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 										{
 											id: "reset",
 											role: "assistant",
-											content: "Hội thoại đã được làm mới. Tôi có thể hỗ trợ gì cho bạn?",
-											timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+											content:
+												"Hội thoại đã được làm mới. Tôi có thể hỗ trợ gì cho bạn?",
+											local: true,
+											timestamp: new Date().toLocaleTimeString([], {
+												hour: "2-digit",
+												minute: "2-digit",
+											}),
 										},
 									])
 								}
@@ -163,7 +182,7 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 								key={m.id}
 								className={cn(
 									"flex flex-col",
-									m.role === "user" ? "items-end" : "items-start"
+									m.role === "user" ? "items-end" : "items-start",
 								)}
 							>
 								<div
@@ -171,20 +190,11 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 										"max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 leading-relaxed shadow-sm",
 										m.role === "user"
 											? "bg-primary text-primary-foreground rounded-br-none"
-											: "bg-muted text-foreground rounded-bl-none"
+											: "bg-muted text-foreground rounded-bl-none",
 									)}
 								>
 									{m.content}
 								</div>
-								{m.toolsCalled && m.toolsCalled.length > 0 && (
-									<div className="mt-1 flex gap-1">
-										{m.toolsCalled.map((t) => (
-											<span key={t} className="text-[10px] text-muted-foreground bg-muted/80 rounded px-1.5 py-0.5">
-												🔍 Đã gọi tool: {t}
-											</span>
-										))}
-									</div>
-								)}
 								<span className="mt-0.5 px-1 text-[10px] text-muted-foreground">
 									{m.timestamp}
 								</span>
@@ -196,7 +206,9 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 								<div className="size-2 animate-bounce rounded-full bg-violet-600 [animation-delay:-0.3s]"></div>
 								<div className="size-2 animate-bounce rounded-full bg-violet-600 [animation-delay:-0.15s]"></div>
 								<div className="size-2 animate-bounce rounded-full bg-violet-600"></div>
-								<span className="text-[11px]">AI đang kiểm tra cơ sở dữ liệu...</span>
+								<span className="text-[11px]">
+									AI đang kiểm tra cơ sở dữ liệu...
+								</span>
 							</div>
 						)}
 						<div ref={messagesEndRef} />
@@ -208,7 +220,9 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 							<button
 								type="button"
 								className="rounded-full border bg-background px-2.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-								onClick={() => handleSend("Thống kê doanh số và đơn hoàn 30 ngày qua")}
+								onClick={() =>
+									handleSend("Thống kê doanh số và đơn hoàn 30 ngày qua")
+								}
 							>
 								📊 Báo cáo shop 30 ngày
 							</button>
@@ -258,7 +272,7 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 					"flex items-center gap-2 rounded-full px-4 py-3 font-medium text-white shadow-xl transition-all duration-300 hover:scale-105 active:scale-95",
 					isOpen
 						? "bg-neutral-800 hover:bg-neutral-900"
-						: "bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:opacity-95"
+						: "bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:opacity-95",
 				)}
 			>
 				{isOpen ? (
@@ -270,7 +284,9 @@ export function PancakeAiChatWidget({ shopId, shopName }: { shopId?: string; sho
 					<>
 						<span className="flex size-2 rounded-full bg-emerald-400 animate-pulse"></span>
 						<Chat className="size-5" />
-						<span className="text-xs font-semibold tracking-wide">Trợ lý AI Pancake</span>
+						<span className="text-xs font-semibold tracking-wide">
+							Trợ lý AI Pancake
+						</span>
 					</>
 				)}
 			</button>

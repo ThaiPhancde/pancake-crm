@@ -205,25 +205,25 @@ is sent. No client is constructed, so there is no queue waiting to flush later.
 
 ## Pancake POS & Pages Conversations
 
-Pancake integration separates POS shop synchronization (`https://pos.pages.fm/api/v1`) from Pages & Conversations synchronization (`https://pages.fm/api/v1` and `https://pages.fm/api/public_api/v1` / `v2`):
+Pancake POS data (`https://pos.pages.fm/api/v1`) is synchronised into the
+database by `apps/pancake-sync`. Pancake Pages conversations are not imported.
+The contact sheet's Hội thoại tab reads one conversation from Pancake when it
+opens. The conversation ID is the POS customer's `fb_id` (`{pageId}_{psid}`).
+The API keeps each result in memory for `PANCAKE.conversationCacheMs`.
 
 | Variable | Purpose |
 | --- | --- |
-| `PANCAKE_USER_ACCESS_TOKEN` | Default Pancake User Access Token (`access_token`) used to list accessible Pages (`GET /pages`) and generate a `page_access_token` when explicitly confirmed by a shop manager (`POST /pages/generate_page_access_token`). Falls back to `PANCAKE_TOKEN` if unset; can also be overridden per workspace in Settings → Connections → Pancake. |
-| `PANCAKE_TOKEN_ENCRYPTION_KEY` | 32-byte key (64 hex chars, 32+ ASCII chars, or base64) used for AES-256-GCM encryption at rest of `PancakeAccountConnection.encryptedUserToken` and `PancakePage.encryptedAccessToken`. Falls back to a SHA-256 derivation of `BETTER_AUTH_SECRET` in local development. |
-| `PANCAKE_PAGE_WEBHOOK_TOKEN` | Shared token (min 16 chars) verifying `POST /api/integrations/pancake/webhook/page/:shopId` and `POST /api/integrations/pancake/webhook/page` via `x-pancake-webhook-token` header or `Authorization: Bearer <token>`. Falls back to `PANCAKE_WEBHOOK_TOKEN` when unset. |
-| `PANCAKE_SYNC_ENABLED` | Set to `"true"` alongside `PANCAKE_LIVE_SYNC_APPROVED="I_UNDERSTAND_LIVE_READ_ONLY_SYNC"` to enable background polling in `apps/pancake-sync`. |
+| `PANCAKE_USER_ACCESS_TOKEN` | Default Pancake User Access Token. It lists the Pages (`GET /pages`) and generates a `page_access_token` after a shop manager confirms. Falls back to `PANCAKE_TOKEN`. Settings → Connections → Pancake overrides it per shop. |
+| `PANCAKE_TOKEN_ENCRYPTION_KEY` | Secret for AES-256-GCM encryption of stored User and Page Access Tokens. Unset or empty uses `BETTER_AUTH_SECRET`. |
+| `AI_GATEWAY_API_KEY` | Enables the Pancake AI chat widget (`/api/pancake/ai-chat`). Without it the widget returns an error. Model and limits are `PANCAKE.assistant`. |
 
-### Worker & Webhook Deployment
+### Token encryption
 
-- **Background Worker (`apps/pancake-sync`)**:
-  - Run one pass: `bun run --cwd apps/pancake-sync sync:once`
-  - Continuous daemon (`PANCAKE.pollIntervalMs = 60s`): `bun run --cwd apps/pancake-sync start`
-  - For each shop (`1635200759`, `1328205216`, `1635200270`), the worker acquires a PostgreSQL advisory lock (`pg_try_advisory_lock`), syncs POS resources (`syncShop`), and then runs `syncShopPages` with bounded concurrency (`pageSyncConcurrency = 3`), per-page token-bucket rate limiting (`<= 5 req/page/sec`), HTTP 429 retry/backoff, and resumable checkpoints (`PancakePageSyncCursor`).
-- **Non-Destructive Webhook Endpoints**:
-  - Per-workspace: `POST /api/integrations/pancake/webhook/page/:shopId`
-  - Auto-routed by `page_id`: `POST /api/integrations/pancake/webhook/page`
-  - Does **not** overwrite existing company webhooks on Pancake; events are deduplicated via `PancakePageWebhookEvent` (`request_id` / payload hash) and out-of-order events (`version`) are ignored while incremental polling reconciles any missed updates.
+Every process that reads Page tokens must use the secret that encrypted them.
+Do not generate a new key to repair a decryption error. Set the original
+secret, then redeploy. A token that does not decrypt shows as unavailable in
+the Hội thoại tab. The stored token is kept. Legacy `invalid` tokens that
+decrypt are restored to `active` when the Page list loads.
 
 ## Not env vars
 
