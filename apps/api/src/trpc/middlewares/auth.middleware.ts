@@ -1,3 +1,4 @@
+import { GUEST_ACCESS } from "@crm/auth/guest-config";
 import { Injectable } from "@nestjs/common";
 import { TRPCError } from "@trpc/server";
 import type {
@@ -19,6 +20,12 @@ export class AuthMiddleware implements TRPCMiddleware {
 		}
 
 		setRequestUserId(user.id);
+		if (user.id === GUEST_ACCESS.id && opts.type !== "query") {
+			throw new TRPCError({
+				code: "FORBIDDEN",
+				message: "Guest chỉ có quyền xem dữ liệu.",
+			});
+		}
 
 		const nextCtx: AuthedTrpcContext = { ...ctx, user };
 		return opts.next({ ctx: nextCtx });

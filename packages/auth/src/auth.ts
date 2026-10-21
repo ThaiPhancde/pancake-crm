@@ -10,7 +10,9 @@ import { organization } from "better-auth/plugins/organization";
 import { API_KEY_EXPIRATION, API_KEY_HEADER, API_KEY_PREFIX } from "./api-keys";
 import { AUTH_COOKIE_PREFIX } from "./cookies";
 import { env } from "./env";
-import { ensureWorkspaceMembership } from "./organization";
+import { guestAccess } from "./guest";
+import { GUEST_ACCESS } from "./guest-config";
+import { ensureWorkspaceMembership, WORKSPACE_ID } from "./organization";
 import {
 	GOOGLE_PROVIDER_ID,
 	MICROSOFT_PROVIDER_ID,
@@ -122,6 +124,7 @@ export const auth = betterAuth({
 	},
 
 	plugins: [
+		guestAccess(),
 		...(slackOAuth
 			? [
 					genericOAuth({
@@ -283,6 +286,9 @@ export const auth = betterAuth({
 		session: {
 			create: {
 				before: async (session) => {
+					if (session.userId === GUEST_ACCESS.id) {
+						return { data: { ...session, activeOrganizationId: WORKSPACE_ID } };
+					}
 					const workspaceId = await ensureWorkspaceMembership(session.userId);
 
 					return {
@@ -291,6 +297,7 @@ export const auth = betterAuth({
 				},
 
 				after: async (session) => {
+					if (session.userId === GUEST_ACCESS.id) return;
 					const user = await db.user.findUnique({
 						where: { id: session.userId },
 						select: { id: true, email: true },

@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { AuthHeading, AuthShell } from "@/components/auth-shell";
 import { getSession } from "@/lib/session";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
+import { GuestSignIn } from "./guest-sign-in";
 import { SocialSignIn } from "./social-sign-in";
 import { type SsoProvider, SsoSignIn } from "./sso-sign-in";
 
@@ -53,6 +54,7 @@ export default function SignInPage({ searchParams }: PageProps<"/sign-in">) {
 			>
 				<SignIn searchParams={searchParams} />
 			</Suspense>
+			<GuestSignIn />
 		</AuthShell>
 	);
 }

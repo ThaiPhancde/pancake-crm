@@ -119,10 +119,10 @@ export function PancakeAiChatWidget({
 	};
 
 	return (
-		<div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">
+		<div className="relative z-50 flex shrink-0 flex-col items-end border-t bg-background px-3 py-2">
 			{/* Chat window */}
 			{isOpen && (
-				<div className="mb-3 flex h-[520px] w-[380px] sm:w-[420px] flex-col overflow-hidden rounded-2xl border bg-card shadow-2xl transition-all duration-200 ease-in-out">
+				<div className="absolute bottom-full right-3 mb-2 flex h-[min(520px,calc(100dvh-120px))] w-[min(420px,calc(100vw-24px))] flex-col overflow-hidden rounded-lg border bg-card shadow-xl">
 					{/* Header */}
 					<div className="flex items-center justify-between border-b bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 text-white">
 						<div className="flex items-center gap-2">
@@ -268,6 +268,7 @@ export function PancakeAiChatWidget({
 			<button
 				type="button"
 				onClick={() => setIsOpen((prev) => !prev)}
+				aria-expanded={isOpen}
 				className={cn(
 					"flex items-center gap-2 rounded-full px-4 py-3 font-medium text-white shadow-xl transition-all duration-300 hover:scale-105 active:scale-95",
 					isOpen

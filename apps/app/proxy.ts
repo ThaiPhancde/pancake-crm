@@ -31,6 +31,7 @@ export async function proxy(request: NextRequest) {
 	const { pathname } = request.nextUrl;
 
 	if (pathname === SIGN_IN_PATH) return NextResponse.next();
+	if (pathname === "/guest") return NextResponse.next();
 	if (
 		isUnder(pathname, "/pancake-demo") &&
 		process.env.NODE_ENV === "production"
