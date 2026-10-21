@@ -36,6 +36,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { type User, UserMenu } from "@/components/app-header";
+import { PancakeAiChatWidget } from "@/components/pancake/ai-chat-widget";
 import { signOutAndRedirect } from "@/lib/sign-out";
 import { AutomationCenter } from "./automation-center";
 import { GlobalSearch } from "./inbox/global-search";
@@ -43,7 +44,6 @@ import { type NavItem, SHOP_NAV } from "./nav";
 import { NotificationPanel } from "./notification-panel";
 import { shopInitial } from "./shop-profile";
 import { shopUrl } from "./url";
-import { PancakeAiChatWidget } from "@/components/pancake/ai-chat-widget";
 
 export type ShopSummary = { id: string; name: string };
 

@@ -48,9 +48,7 @@ const slackCredentials = ():
 
 const cleanUrl = (url: string): string => url.replace(/\/+$/, "");
 
-const apiUrl = cleanUrl(
-	optional("API_URL") ?? DEFAULT_API_URL,
-);
+const apiUrl = cleanUrl(optional("API_URL") ?? DEFAULT_API_URL);
 
 const appUrls = (optional("APP_URL") ?? DEFAULT_APP_URL)
 	.split(",")
@@ -59,9 +57,7 @@ const appUrls = (optional("APP_URL") ?? DEFAULT_APP_URL)
 
 const appUrl = appUrls[0] ?? DEFAULT_APP_URL;
 
-const authUrl = cleanUrl(
-	optional("BETTER_AUTH_URL") ?? appUrl,
-);
+const authUrl = cleanUrl(optional("BETTER_AUTH_URL") ?? appUrl);
 
 export const env = {
 	apiUrl,

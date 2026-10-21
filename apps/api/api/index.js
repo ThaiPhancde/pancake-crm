@@ -319830,15 +319830,26 @@ var PANCAKE = {
   pagesPublicV1BaseUrl: "https://pages.fm/api/public_api/v1",
   pagesPublicV2BaseUrl: "https://pages.fm/api/public_api/v2",
   pageSize: 100,
-  conversationBatchSize: 60,
   messageBatchSize: 30,
   pageRequestGapMs: 220,
-  pageSyncConcurrency: 3,
-  conversationPageBudget: 5,
-  messagePageBudget: 25,
-  defaultImportDays: 30,
-  maxBulkPages: 600,
-  messageListSize: 30,
+  pageWriteChunk: 100,
+  pageUpdateConcurrency: 5,
+  conversationCacheMs: 2 * MINUTE_MS4,
+  conversationCacheMax: 300,
+  assistant: {
+    gatewayUrl: "https://ai-gateway.vercel.sh/v1/chat/completions",
+    model: "openai/gpt-4o-mini",
+    maxRounds: 3,
+    maxTokens: 900,
+    historyMessages: 12,
+    messageMaxChars: 4000,
+    timeoutMs: 25000,
+    maxRows: 20,
+    maxCustomers: 5,
+    recentOrders: 5,
+    minPhoneDigits: 7,
+    phoneMatchDigits: 8
+  },
   timeoutMs: 20000,
   attempts: 4,
   retryMs: 1000,
@@ -320396,7 +320407,6 @@ var customerProfileWire = customerWire.pick({
 });
 
 // ../../packages/pancake/src/conversations.ts
-import { createHash as createHash6 } from "node:crypto";
 init_zod();
 
 // ../../packages/pancake/src/access.ts
@@ -320948,7 +320958,7 @@ var ALGORITHM = "aes-256-gcm";
 var IV_BYTES = 12;
 var VERSION = "v1";
 function resolveEncryptionKey(secretOverride) {
-  const raw4 = secretOverride ?? process.env.PANCAKE_TOKEN_ENCRYPTION_KEY ?? process.env.BETTER_AUTH_SECRET ?? "pancake-crm-local-fallback-encryption-key-32b";
+  const raw4 = secretOverride ?? (process.env.PANCAKE_TOKEN_ENCRYPTION_KEY || process.env.BETTER_AUTH_SECRET || "pancake-crm-local-fallback-encryption-key-32b");
   return createHash5("sha256").update(raw4).digest();
 }
 function encryptToken(plain, secretOverride) {
@@ -320995,92 +321005,29 @@ function redactSecrets(input2) {
   return input2.replace(/((?:page_)?access_token|api_key)=([^&\s"']+)/gi, (_match, param, val) => `${param}=${maskToken(val)}`).replace(/("(?:(?:page_|user_)?access_token|api_key)"\s*:\s*")([^"]+)(")/gi, (_match, prefix, val, suffix) => `${prefix}${maskToken(val)}${suffix}`).replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, (jwt2) => maskToken(jwt2));
 }
 
-// ../../packages/pancake/src/errors.ts
-init_zod();
+// ../../packages/pancake/src/message-text.ts
+var entities = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " "
+};
+function messageText(value) {
+  return value.replace(/<!--[\s\S]*?-->/g, "").replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "").replace(/<br\b[^>]*\/?>/gi, `
+`).replace(/<\/(?:div|p|li|tr|h[1-6])\s*>/gi, `
+`).replace(/<\/?[a-z][^>]*>/gi, "").replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (match, entity) => {
+    if (!entity.startsWith("#"))
+      return entities[entity.toLowerCase()] ?? match;
+    const hex4 = entity[1]?.toLowerCase() === "x";
+    const code = Number.parseInt(entity.slice(hex4 ? 2 : 1), hex4 ? 16 : 10);
+    return code > 0 && code <= 1114111 && !(code >= 55296 && code <= 57343) ? String.fromCodePoint(code) : "�";
+  }).replace(/\r\n/g, `
+`).replace(/[ \t]+\n/g, `
+`).replace(/\n{3,}/g, `
 
-// ../../packages/pancake/src/client.ts
-class PancakeApiError extends Error {
-  code;
-  retryAfterMs;
-  constructor(code, retryAfterMs = 0) {
-    super(code);
-    this.code = code;
-    this.retryAfterMs = retryAfterMs;
-    this.name = "PancakeApiError";
-  }
-}
-
-// ../../packages/pancake/src/errors.ts
-var UNAVAILABLE = [
-  /connection terminated/i,
-  /can't reach database/i,
-  /econnreset/i,
-  /econnrefused/i,
-  /etimedout/i,
-  /socket disconnected/i,
-  /connection timeout/i,
-  /server closed the connection/i,
-  /max_client_conn/i,
-  /08P01/
-];
-var TIMEOUT = [
-  /expired transaction/i,
-  /transaction api error/i,
-  /statement timeout/i,
-  /query read timeout/i
-];
-function matches(patterns, text2) {
-  return patterns.some((pattern) => pattern.test(text2));
-}
-function operation(message2) {
-  const found = /prisma\.(\w+)\.(\w+)\(\)/.exec(message2);
-  return found ? `${found[1]}.${found[2]}` : undefined;
-}
-function zodDetail(error53) {
-  return error53.issues.slice(0, PANCAKE.logIssuesMax).map((issue2) => `${issue2.path.join(".") || "(root)"}: ${issue2.message}`);
-}
-function classifyFailure(error53) {
-  if (error53 instanceof PancakeApiError)
-    return { code: error53.code, retryable: false, detail: [] };
-  if (error53 instanceof exports_external.ZodError)
-    return {
-      code: "PAYLOAD_INVALID",
-      retryable: false,
-      detail: zodDetail(error53)
-    };
-  if (!(error53 instanceof Error))
-    return { code: "UNKNOWN_ERROR", retryable: false, detail: [] };
-  const message2 = error53.message;
-  const code = "code" in error53 ? String(error53.code) : undefined;
-  const detail = [operation(message2), code, error53.name].filter((part) => Boolean(part));
-  if (matches(TIMEOUT, message2))
-    return { code: "DATABASE_TIMEOUT", retryable: false, detail };
-  if (matches(UNAVAILABLE, `${message2} ${code ?? ""}`))
-    return {
-      code: "DATABASE_UNAVAILABLE",
-      retryable: true,
-      detail: [...detail, message2.split(`
-`)[0]?.slice(0, 120) ?? ""].filter(Boolean)
-    };
-  if (operation(message2) || code?.startsWith("P"))
-    return { code: "DATABASE_ERROR", retryable: false, detail };
-  return { code: "UNKNOWN_ERROR", retryable: false, detail };
-}
-function logSync(entry) {
-  const raw4 = JSON.stringify({ at: new Date().toISOString(), ...entry });
-  process.stderr.write(`${redactSecrets(raw4)}
-`);
-}
-async function withDbRetry(work, delayMs = PANCAKE.dbRetryMs) {
-  for (let attempt = 1;; attempt++) {
-    try {
-      return await work();
-    } catch (error53) {
-      if (!classifyFailure(error53 instanceof Error ? error53 : undefined).retryable || attempt >= PANCAKE.dbRetryAttempts)
-        throw error53;
-      await Bun.sleep(delayMs * attempt);
-    }
-  }
+`).trim();
 }
 
 // ../../packages/pancake/src/pages-client.ts
@@ -321140,76 +321087,6 @@ var generateTokenObjectEnvelope = exports_external.object({
     page_access_token: exports_external.string().optional()
   }).passthrough().optional()
 }).passthrough();
-var markSeenEnvelope = exports_external.object({
-  success: exports_external.boolean().optional()
-}).passthrough();
-var conversationCustomerWire = exports_external.object({
-  id: sourceId.optional(),
-  fb_id: exports_external.string().nullish(),
-  customer_id: exports_external.string().nullish(),
-  global_id: exports_external.string().nullish(),
-  name: exports_external.string().nullish()
-}).passthrough();
-var recentPhoneWire = exports_external.union([
-  exports_external.string().transform((s) => ({ phone_number: s, captured: null })),
-  exports_external.object({
-    phone_number: exports_external.string().nullish(),
-    captured: exports_external.string().nullish()
-  }).passthrough()
-]);
-var conversationTagWire = exports_external.union([
-  exports_external.number(),
-  exports_external.string(),
-  exports_external.object({
-    id: exports_external.union([exports_external.number(), exports_external.string()]).nullish(),
-    text: exports_external.string().nullish(),
-    color: exports_external.string().nullish()
-  }).passthrough()
-]).nullable();
-var conversationWire = exports_external.object({
-  id: sourceId,
-  type: exports_external.string().nullish(),
-  page_id: sourceId.nullish(),
-  post_id: exports_external.string().nullish(),
-  snippet: exports_external.string().nullish(),
-  seen: exports_external.boolean().nullish(),
-  is_replied: exports_external.boolean().nullish(),
-  message_count: exports_external.number().int().nonnegative().nullish(),
-  has_phone: exports_external.boolean().nullish(),
-  inserted_at: exports_external.string().nullish(),
-  updated_at: exports_external.string().nullish(),
-  version: exports_external.number().int().nullish(),
-  customer_id: exports_external.string().nullish(),
-  from: exports_external.object({
-    id: sourceId.nullish(),
-    name: exports_external.string().nullish(),
-    email: exports_external.string().nullish()
-  }).passthrough().nullish(),
-  last_sent_by: exports_external.object({
-    id: sourceId.nullish(),
-    name: exports_external.string().nullish(),
-    uid: exports_external.string().nullish(),
-    admin_id: exports_external.string().nullish(),
-    admin_name: exports_external.string().nullish()
-  }).passthrough().nullish(),
-  tags: exports_external.array(conversationTagWire).nullish(),
-  assignee_ids: exports_external.array(sourceId).nullish(),
-  customers: exports_external.array(conversationCustomerWire).nullish(),
-  recent_phone_numbers: exports_external.array(recentPhoneWire).nullish(),
-  page_customer: exports_external.object({
-    id: sourceId.nullish(),
-    name: exports_external.string().nullish(),
-    customer_id: exports_external.string().nullish(),
-    psid: exports_external.string().nullish(),
-    global_id: exports_external.string().nullish()
-  }).passthrough().nullish()
-}).passthrough();
-var conversationsEnvelope = exports_external.object({
-  success: exports_external.boolean().optional(),
-  conversations: exports_external.array(conversationWire).optional(),
-  message: exports_external.string().optional(),
-  error_code: exports_external.union([exports_external.string(), exports_external.number()]).optional()
-}).passthrough();
 var messageAttachmentWire = exports_external.object({
   id: sourceId.nullish(),
   type: exports_external.string().nullish(),
@@ -321254,38 +321131,12 @@ var messageWire = exports_external.object({
     admin_name: exports_external.string().nullish(),
     page_customer_id: exports_external.string().nullish()
   }).passthrough().nullish(),
-  attachments: exports_external.array(messageAttachmentWire).nullish(),
-  phone_info: exports_external.array(recentPhoneWire).nullish()
-}).passthrough();
-var messageCustomerDetailWire = exports_external.object({
-  id: sourceId.nullish(),
-  customer_id: exports_external.string().nullish(),
-  fb_id: exports_external.string().nullish(),
-  global_id: exports_external.string().nullish(),
-  name: exports_external.string().nullish(),
-  can_inbox: exports_external.boolean().nullish(),
-  recent_phone_numbers: exports_external.array(recentPhoneWire).nullish(),
-  shop_customer_addresses: exports_external.array(exports_external.object({
-    phone_number: exports_external.string().nullish(),
-    full_name: exports_external.string().nullish(),
-    full_address: exports_external.string().nullish()
-  }).passthrough()).nullish()
+  attachments: exports_external.array(messageAttachmentWire).nullish()
 }).passthrough();
 var messagesEnvelope = exports_external.object({
   success: exports_external.boolean().optional(),
-  conversation_id: sourceId.nullish(),
   messages: exports_external.array(messageWire).optional(),
-  customers: exports_external.array(messageCustomerDetailWire).nullish(),
-  conv_customers: exports_external.array(conversationCustomerWire).nullish(),
-  conv_from: exports_external.object({
-    id: sourceId.nullish(),
-    name: exports_external.string().nullish(),
-    email: exports_external.string().nullish()
-  }).passthrough().nullish(),
   can_inbox: exports_external.boolean().nullish(),
-  recent_phone_numbers: exports_external.array(recentPhoneWire).nullish(),
-  conv_phone_numbers: exports_external.array(recentPhoneWire).nullish(),
-  conv_recent_phone_numbers: exports_external.array(recentPhoneWire).nullish(),
   message: exports_external.string().optional(),
   error_code: exports_external.union([exports_external.string(), exports_external.number()]).optional()
 }).passthrough();
@@ -321334,17 +321185,6 @@ function classifyApiErrorBody(status, bodyMessage, errorCode) {
   if (status === 429)
     return "HTTP_429";
   return status >= 400 ? `HTTP_${status}` : "INVALID_API_RESPONSE";
-}
-function extractPhones(items) {
-  if (!items?.length)
-    return [];
-  const result = [];
-  for (const item of items) {
-    const val = item.phone_number ?? item.captured;
-    if (val?.trim())
-      result.push(val.trim());
-  }
-  return [...new Set(result)];
 }
 function scrubRawPage(item) {
   return {
@@ -321524,45 +321364,6 @@ class PancakePagesClient {
     }
     throw new PancakePagesApiError("PERMISSION_DENIED", "Pancake không trả về Page Access Token. Tài khoản cần quyền Quản trị viên (ADMINISTER) trên Page này.");
   }
-  async listConversations(pageId, pageAccessToken, options = {}) {
-    const token = pageAccessToken.trim();
-    if (!pageId.trim() || !token) {
-      throw new PancakePagesApiError("CONFIGURATION_REQUIRED");
-    }
-    const url2 = new URL(`${PANCAKE.pagesPublicV2BaseUrl}/pages/${encodeURIComponent(pageId)}/conversations`);
-    url2.searchParams.set("page_access_token", token);
-    if (options.lastConversationId) {
-      url2.searchParams.set("last_conversation_id", options.lastConversationId);
-    }
-    if (options.since !== undefined) {
-      url2.searchParams.set("since", String(Math.floor(options.since)));
-    }
-    if (options.until !== undefined) {
-      url2.searchParams.set("until", String(Math.floor(options.until)));
-    }
-    if (options.orderBy) {
-      url2.searchParams.set("order_by", options.orderBy);
-    }
-    if (options.unreadFirst !== undefined) {
-      url2.searchParams.set("unread_first", String(options.unreadFirst));
-    }
-    if (options.types?.length) {
-      for (const t of options.types) {
-        url2.searchParams.append("type[]", t);
-      }
-    }
-    const raw4 = await this.requestJson(`page:${pageId}`, url2, {
-      method: "GET"
-    });
-    const parsed = conversationsEnvelope.safeParse(raw4);
-    if (!parsed.success) {
-      throw new PancakePagesApiError("INVALID_API_RESPONSE");
-    }
-    if (parsed.data.success === false) {
-      throw new PancakePagesApiError(classifyApiErrorBody(401, parsed.data.message ?? "Page Access Token không hợp lệ", parsed.data.error_code), parsed.data.message ?? "Page Access Token hết hạn, bị thu hồi hoặc thiếu quyền truy cập.");
-    }
-    return parsed.data.conversations ?? [];
-  }
   async listMessages(pageId, conversationId, pageAccessToken, currentCount) {
     const token = pageAccessToken.trim();
     if (!pageId.trim() || !conversationId.trim() || !token) {
@@ -321583,20 +321384,9 @@ class PancakePagesClient {
     if (parsed.data.success === false) {
       throw new PancakePagesApiError(classifyApiErrorBody(401, parsed.data.message ?? "Không thể tải tin nhắn", parsed.data.error_code), parsed.data.message ?? "Page Access Token không hợp lệ hoặc không đủ quyền đọc tin nhắn.");
     }
-    const phones = [
-      ...new Set([
-        ...extractPhones(parsed.data.recent_phone_numbers),
-        ...extractPhones(parsed.data.conv_phone_numbers),
-        ...extractPhones(parsed.data.conv_recent_phone_numbers)
-      ])
-    ];
     return {
       messages: parsed.data.messages ?? [],
-      customers: parsed.data.customers ?? [],
-      convCustomers: parsed.data.conv_customers ?? [],
-      convFrom: parsed.data.conv_from ?? null,
-      canInbox: parsed.data.can_inbox ?? true,
-      phones
+      canInbox: parsed.data.can_inbox ?? true
     };
   }
   async sendMessage(pageId, conversationId, pageAccessToken, payload2) {
@@ -321648,23 +321438,6 @@ class PancakePagesClient {
       errorMessage: null
     };
   }
-  async markSeen(pageId, conversationId, pageAccessToken, seen) {
-    const token = pageAccessToken.trim();
-    if (!pageId.trim() || !conversationId.trim() || !token) {
-      throw new PancakePagesApiError("CONFIGURATION_REQUIRED");
-    }
-    const endpoint = seen ? "read" : "unread";
-    const url2 = new URL(`${PANCAKE.pagesPublicV1BaseUrl}/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(conversationId)}/${endpoint}`);
-    url2.searchParams.set("page_access_token", token);
-    const raw4 = await this.requestJson(`page:${pageId}`, url2, {
-      method: "POST"
-    });
-    const parsed = markSeenEnvelope.safeParse(raw4);
-    if (parsed.success && parsed.data.success !== undefined) {
-      return parsed.data.success;
-    }
-    return true;
-  }
 }
 function describeSendErrorCode(code) {
   switch (code) {
@@ -321679,6 +321452,10 @@ function describeSendErrorCode(code) {
       return `Nền tảng từ chối gửi tin nhắn (mã lỗi: ${code}).`;
   }
 }
+
+// ../../packages/pancake/src/queries.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+init_zod();
 
 // ../../packages/pancake/src/phone.ts
 function phoneTail(phone, dial) {
@@ -322021,2165 +321798,7 @@ async function setDefaultSavedFilter(db4, userId, input2) {
   return { id: row.id, isDefault: input2.isDefault };
 }
 
-// ../../packages/pancake/src/conversations.ts
-var connectUserTokenInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  userAccessToken: exports_external.string().trim().min(8).max(4000).optional(),
-  autoAssignMatchingShop: exports_external.boolean().default(false)
-});
-var pagesListInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  q: exports_external.string().max(120).default(""),
-  filter: exports_external.enum([
-    "all",
-    "assigned",
-    "matching_shop",
-    "has_token",
-    "missing_token",
-    "error"
-  ]).default("all")
-});
-var bulkAssignPagesInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  pageIds: exports_external.array(exports_external.string().min(1)).min(1).max(PANCAKE.maxBulkPages),
-  assigned: exports_external.boolean(),
-  syncEnabled: exports_external.boolean().optional(),
-  importFrom: exports_external.iso.datetime({ offset: true }).nullable().optional(),
-  importUntil: exports_external.iso.datetime({ offset: true }).nullable().optional()
-}).refine((v2) => !v2.importFrom || !v2.importUntil || v2.importFrom <= v2.importUntil, "Khoảng thời gian import không hợp lệ");
-var configurePageSyncInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  pageIds: exports_external.array(exports_external.string().min(1)).min(1).max(PANCAKE.maxBulkPages),
-  syncEnabled: exports_external.boolean().optional(),
-  importFrom: exports_external.iso.datetime({ offset: true }).nullable().optional(),
-  importUntil: exports_external.iso.datetime({ offset: true }).nullable().optional(),
-  resetCursor: exports_external.boolean().default(false)
-}).refine((v2) => !v2.importFrom || !v2.importUntil || v2.importFrom <= v2.importUntil, "Khoảng thời gian import không hợp lệ");
-var setPageManualTokenInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  pageId: exports_external.string().min(1),
-  pageAccessToken: exports_external.string().trim().min(8).max(4000),
-  confirmReplace: exports_external.literal(true)
-});
-var confirmGeneratePageTokenInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  pageId: exports_external.string().min(1),
-  confirmReplace: exports_external.literal(true)
-});
-var syncPagesNowInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  pageIds: exports_external.array(exports_external.string().min(1)).max(50).optional(),
-  conversationBudget: exports_external.number().int().min(1).max(10).default(2),
-  messageBudget: exports_external.number().int().min(1).max(30).default(10)
-});
-var pancakeConversationListInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  pageId: exports_external.string().min(1).optional(),
-  customerId: exports_external.string().min(1).optional(),
-  linkStatus: exports_external.enum(["all", "linked", "unlinked", "ambiguous"]).default("all"),
-  unreadOnly: exports_external.boolean().default(false),
-  q: exports_external.string().max(120).default(""),
-  page: exports_external.number().int().min(1).max(1e5).default(1),
-  pageSize: exports_external.number().int().min(1).max(PANCAKE.maxListSize).default(25)
-});
-var conversationMessagesInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  pageId: exports_external.string().min(1),
-  conversationId: exports_external.string().min(1),
-  beforeInsertedAt: exports_external.iso.datetime({ offset: true }).optional(),
-  beforeMessageId: exports_external.string().min(1).optional(),
-  limit: exports_external.number().int().min(1).max(100).default(PANCAKE.messageListSize),
-  fetchRemoteOlder: exports_external.boolean().default(false)
-});
-var sendConversationMessageInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  pageId: exports_external.string().min(1),
-  conversationId: exports_external.string().min(1),
-  clientMessageId: exports_external.string().trim().min(4).max(120),
-  message: exports_external.string().trim().min(1).max(4000)
-});
-var markConversationSeenInput = exports_external.object({
-  shopId: exports_external.string().min(1),
-  pageId: exports_external.string().min(1),
-  conversationId: exports_external.string().min(1),
-  seen: exports_external.boolean().default(true)
-});
-var customerRawPhoneSchema = exports_external.object({
-  phone_numbers: exports_external.array(exports_external.string()).optional()
-}).passthrough();
-var storedAttachmentSchema = exports_external.array(exports_external.object({
-  id: exports_external.string().nullish(),
-  type: exports_external.string().nullish(),
-  url: exports_external.string().nullish(),
-  preview_url: exports_external.string().nullish(),
-  file_url: exports_external.string().nullish(),
-  name: exports_external.string().nullish(),
-  mime_type: exports_external.string().nullish()
-}).passthrough());
-function describeMissingTokenReason(page) {
-  if (page.roleInPage === "NO_PERMISSION") {
-    return {
-      tokenStatus: "permission_denied",
-      tokenReason: "Tài khoản không có quyền truy cập Page này trên Pancake (nopermission)."
-    };
-  }
-  if (page.roleInPage && page.roleInPage !== "ADMINISTER") {
-    return {
-      tokenStatus: "permission_denied",
-      tokenReason: `Tài khoản chỉ có quyền ${page.roleInPage} trên Page này (cần quyền ADMINISTER để lấy/tạo Page Access Token hoặc nhập token hiện có).`
-    };
-  }
-  return {
-    tokenStatus: "missing",
-    tokenReason: "Page chưa có Page Access Token. Vui lòng nhập token hiện có hoặc xác nhận tạo mới."
-  };
-}
-async function resolveUserAccessToken(db4, shopId2, explicitToken) {
-  if (explicitToken?.trim()) {
-    return explicitToken.trim();
-  }
-  const stored = await db4.pancakeAccountConnection.findUnique({
-    where: { shopId: shopId2 }
-  });
-  if (stored?.encryptedUserToken) {
-    return decryptToken(stored.encryptedUserToken);
-  }
-  const envToken = process.env.PANCAKE_USER_ACCESS_TOKEN?.trim() || process.env.PANCAKE_TOKEN?.trim();
-  if (envToken) {
-    return envToken;
-  }
-  throw new PancakePagesApiError("CONFIGURATION_REQUIRED", "Chưa cấu hình Pancake User Access Token cho cửa hàng này.");
-}
-async function connectAndDiscoverPages(db4, userId, input2, adapter = new PancakePagesClient) {
-  await assertShopManager(db4, userId, input2.shopId);
-  const userToken = await resolveUserAccessToken(db4, input2.shopId, input2.userAccessToken);
-  let discovered;
-  try {
-    discovered = await adapter.listPages(userToken);
-  } catch (error53) {
-    const message2 = error53 instanceof Error ? redactSecrets(error53.message) : "Không thể kết nối Pancake User Access Token.";
-    if (input2.userAccessToken) {
-      await db4.pancakeAccountConnection.upsert({
-        where: { shopId: input2.shopId },
-        create: {
-          shopId: input2.shopId,
-          encryptedUserToken: encryptToken(userToken),
-          tokenMasked: maskToken(userToken),
-          status: "invalid",
-          lastError: message2,
-          updatedById: userId
-        },
-        update: {
-          status: "invalid",
-          lastError: message2,
-          updatedById: userId
-        }
-      });
-    } else {
-      await db4.pancakeAccountConnection.updateMany({
-        where: { shopId: input2.shopId },
-        data: {
-          status: "expired",
-          lastError: message2
-        }
-      });
-    }
-    throw error53;
-  }
-  const now2 = new Date;
-  const existingPages = await db4.pancakePage.findMany({
-    where: { shopId: input2.shopId },
-    select: {
-      pageId: true,
-      assigned: true,
-      syncEnabled: true,
-      encryptedAccessToken: true,
-      tokenMasked: true,
-      tokenStatus: true,
-      tokenSource: true,
-      tokenReason: true
-    }
-  });
-  const existingById = new Map(existingPages.map((p2) => [p2.pageId, p2]));
-  let existingTokensSaved = 0;
-  let autoAssigned = 0;
-  await db4.pancakeAccountConnection.upsert({
-    where: { shopId: input2.shopId },
-    create: {
-      shopId: input2.shopId,
-      encryptedUserToken: encryptToken(userToken),
-      tokenMasked: maskToken(userToken),
-      status: "active",
-      lastVerifiedAt: now2,
-      lastError: null,
-      discoveredCount: discovered.length,
-      updatedById: userId
-    },
-    update: {
-      encryptedUserToken: encryptToken(userToken),
-      tokenMasked: maskToken(userToken),
-      status: "active",
-      lastVerifiedAt: now2,
-      lastError: null,
-      discoveredCount: discovered.length,
-      updatedById: userId
-    }
-  });
-  const newRows = [];
-  const updateTasks = [];
-  for (const page of discovered) {
-    const prev = existingById.get(page.pageId);
-    const hasIncomingToken = Boolean(page.existingPageAccessToken);
-    const keepPreviousToken = !hasIncomingToken && Boolean(prev?.encryptedAccessToken);
-    let encryptedAccessToken = null;
-    let tokenMaskedVal = null;
-    let tokenStatus = "missing";
-    let tokenSource = null;
-    let tokenReason = null;
-    if (page.existingPageAccessToken) {
-      encryptedAccessToken = encryptToken(page.existingPageAccessToken);
-      tokenMaskedVal = maskToken(page.existingPageAccessToken);
-      tokenStatus = "active";
-      tokenSource = "existing";
-      tokenReason = null;
-      existingTokensSaved++;
-    } else if (keepPreviousToken && prev) {
-      encryptedAccessToken = prev.encryptedAccessToken;
-      tokenMaskedVal = prev.tokenMasked;
-      tokenStatus = prev.tokenStatus;
-      tokenSource = prev.tokenSource;
-      tokenReason = prev.tokenReason;
-    } else {
-      const missing = describeMissingTokenReason(page);
-      tokenStatus = missing.tokenStatus;
-      tokenReason = missing.tokenReason;
-    }
-    const matchesShop = page.sourceShopId === input2.shopId;
-    const assigned = prev?.assigned ?? (input2.autoAssignMatchingShop && matchesShop);
-    const syncEnabled = prev?.syncEnabled ?? (assigned && tokenStatus === "active" && matchesShop);
-    if (!prev?.assigned && assigned) {
-      autoAssigned++;
-    }
-    if (!prev) {
-      newRows.push({
-        shopId: input2.shopId,
-        pageId: page.pageId,
-        name: page.name,
-        platform: page.platform,
-        username: page.username,
-        avatarUrl: page.avatarUrl,
-        sourceShopId: page.sourceShopId,
-        roleInPage: page.roleInPage,
-        isActivated: page.isActivated,
-        hasSubscription: page.hasSubscription,
-        needFixWebhook: page.needFixWebhook,
-        assigned,
-        syncEnabled,
-        encryptedAccessToken,
-        tokenMasked: tokenMaskedVal,
-        tokenStatus,
-        tokenSource,
-        tokenReason,
-        raw: page.raw
-      });
-    } else {
-      updateTasks.push(() => db4.pancakePage.update({
-        where: {
-          shopId_pageId: { shopId: input2.shopId, pageId: page.pageId }
-        },
-        data: {
-          name: page.name,
-          platform: page.platform,
-          username: page.username,
-          avatarUrl: page.avatarUrl,
-          sourceShopId: page.sourceShopId,
-          roleInPage: page.roleInPage,
-          isActivated: page.isActivated,
-          hasSubscription: page.hasSubscription,
-          needFixWebhook: page.needFixWebhook,
-          assigned,
-          syncEnabled,
-          encryptedAccessToken,
-          tokenMasked: tokenMaskedVal,
-          tokenStatus,
-          tokenSource,
-          tokenReason,
-          raw: page.raw
-        }
-      }));
-    }
-  }
-  const createChunkSize = 100;
-  for (let i = 0;i < newRows.length; i += createChunkSize) {
-    await db4.pancakePage.createMany({
-      data: newRows.slice(i, i + createChunkSize),
-      skipDuplicates: true
-    });
-  }
-  const updateChunkSize = 5;
-  for (let i = 0;i < updateTasks.length; i += updateChunkSize) {
-    await Promise.all(updateTasks.slice(i, i + updateChunkSize).map((fn2) => fn2()));
-  }
-  await writeAudit(db4, {
-    shopId: input2.shopId,
-    userId,
-    area: "settings",
-    action: "pancake_pages_discover",
-    summary: `Đồng bộ danh sách ${discovered.length} Page từ Pancake (${existingTokensSaved} Page đã có sẵn token${autoAssigned ? `, gán tự động ${autoAssigned} Page khớp mã shop` : ""}).`
-  });
-  return {
-    discoveredCount: discovered.length,
-    existingTokensSaved,
-    autoAssigned,
-    tokenMasked: maskToken(userToken)
-  };
-}
-async function listWorkspacePages(db4, userId, input2) {
-  const grants = await assertShopReader(db4, userId, input2.shopId);
-  const q2 = input2.q.trim().toLowerCase();
-  const [connection, pages, convCounts, msgCounts] = await Promise.all([
-    db4.pancakeAccountConnection.findUnique({
-      where: { shopId: input2.shopId }
-    }),
-    db4.pancakePage.findMany({
-      where: { shopId: input2.shopId },
-      include: { cursor: true },
-      orderBy: [
-        { assigned: "desc" },
-        { syncEnabled: "desc" },
-        { name: "asc" }
-      ]
-    }),
-    db4.pancakeConversation.groupBy({
-      by: ["pageId"],
-      where: { shopId: input2.shopId },
-      _count: { _all: true }
-    }),
-    db4.pancakeMessage.groupBy({
-      by: ["pageId"],
-      where: { shopId: input2.shopId },
-      _count: { _all: true }
-    })
-  ]);
-  const convCountMap = new Map(convCounts.map((row) => [row.pageId, row._count._all]));
-  const msgCountMap = new Map(msgCounts.map((row) => [row.pageId, row._count._all]));
-  const mapped = pages.map((page) => {
-    const conversationCount = convCountMap.get(page.pageId) ?? page.cursor?.syncedConversations ?? 0;
-    const messageCount = msgCountMap.get(page.pageId) ?? page.cursor?.syncedMessages ?? 0;
-    const matchesShop = page.sourceShopId === input2.shopId;
-    return {
-      shopId: page.shopId,
-      pageId: page.pageId,
-      name: page.name,
-      platform: page.platform,
-      username: page.username,
-      avatarUrl: page.avatarUrl,
-      sourceShopId: page.sourceShopId,
-      matchesShop,
-      roleInPage: page.roleInPage,
-      isActivated: page.isActivated,
-      hasSubscription: page.hasSubscription,
-      needFixWebhook: page.needFixWebhook,
-      assigned: page.assigned,
-      syncEnabled: page.syncEnabled,
-      tokenMasked: page.tokenMasked,
-      tokenStatus: page.tokenStatus,
-      tokenSource: page.tokenSource,
-      tokenReason: page.tokenReason,
-      connectStatus: page.connectStatus,
-      importFrom: page.importFrom?.toISOString() ?? null,
-      importUntil: page.importUntil?.toISOString() ?? null,
-      lastSyncAt: page.lastSyncAt?.toISOString() ?? null,
-      lastSuccessAt: (page.lastSuccessAt ?? page.cursor?.lastSuccessAt)?.toISOString() ?? null,
-      lastWebhookAt: page.lastWebhookAt?.toISOString() ?? null,
-      lastError: page.lastError ?? page.cursor?.lastError ?? null,
-      lastErrorCode: page.lastErrorCode ?? page.cursor?.lastErrorCode ?? null,
-      phase: page.cursor?.phase ?? "idle",
-      lastConversationId: page.cursor?.lastConversationId ?? null,
-      pendingConversationId: page.cursor?.pendingConversationId ?? null,
-      pendingMessageCount: page.cursor?.pendingMessageCount ?? 0,
-      watermark: page.cursor?.watermark?.toISOString() ?? null,
-      conversationCount,
-      messageCount
-    };
-  });
-  const filtered = mapped.filter((row) => {
-    if (q2 && !row.name.toLowerCase().includes(q2) && !row.pageId.toLowerCase().includes(q2) && !(row.username ?? "").toLowerCase().includes(q2)) {
-      return false;
-    }
-    if (input2.filter === "assigned")
-      return row.assigned;
-    if (input2.filter === "matching_shop")
-      return row.matchesShop;
-    if (input2.filter === "has_token")
-      return row.tokenStatus === "active";
-    if (input2.filter === "missing_token")
-      return row.tokenStatus !== "active";
-    if (input2.filter === "error") {
-      return Boolean(row.lastError) || row.tokenStatus === "expired" || row.tokenStatus === "revoked" || row.connectStatus === "disconnected";
-    }
-    return true;
-  });
-  const hasEnvToken = Boolean(process.env.PANCAKE_USER_ACCESS_TOKEN?.trim() || process.env.PANCAKE_TOKEN?.trim());
-  return {
-    canManage: canManage(grants, input2.shopId),
-    connection: connection ? {
-      connected: true,
-      tokenMasked: connection.tokenMasked,
-      status: connection.status,
-      lastVerifiedAt: connection.lastVerifiedAt?.toISOString() ?? null,
-      lastError: connection.lastError,
-      discoveredCount: connection.discoveredCount,
-      hasEnvToken
-    } : {
-      connected: false,
-      tokenMasked: hasEnvToken ? maskToken(process.env.PANCAKE_USER_ACCESS_TOKEN || process.env.PANCAKE_TOKEN) : null,
-      status: hasEnvToken ? "env_ready" : "disconnected",
-      lastVerifiedAt: null,
-      lastError: null,
-      discoveredCount: 0,
-      hasEnvToken
-    },
-    summary: {
-      total: mapped.length,
-      assigned: mapped.filter((p2) => p2.assigned).length,
-      syncEnabled: mapped.filter((p2) => p2.assigned && p2.syncEnabled).length,
-      matchingShop: mapped.filter((p2) => p2.matchesShop).length,
-      activeToken: mapped.filter((p2) => p2.tokenStatus === "active").length,
-      missingToken: mapped.filter((p2) => p2.tokenStatus !== "active").length,
-      errorCount: mapped.filter((p2) => Boolean(p2.lastError) || p2.tokenStatus === "expired" || p2.tokenStatus === "revoked").length,
-      totalConversations: mapped.reduce((sum, p2) => sum + p2.conversationCount, 0),
-      totalMessages: mapped.reduce((sum, p2) => sum + p2.messageCount, 0)
-    },
-    pages: filtered
-  };
-}
-async function bulkAssignPages(db4, userId, input2) {
-  await assertShopManager(db4, userId, input2.shopId);
-  const pageIds = [...new Set(input2.pageIds)];
-  const pages = await db4.pancakePage.findMany({
-    where: { shopId: input2.shopId, pageId: { in: pageIds } },
-    select: { pageId: true, tokenStatus: true }
-  });
-  const activePageIds = pages.filter((p2) => p2.tokenStatus === "active").map((p2) => p2.pageId);
-  const nonActivePageIds = pages.filter((p2) => p2.tokenStatus !== "active").map((p2) => p2.pageId);
-  const importFrom = input2.importFrom !== undefined ? input2.importFrom ? new Date(input2.importFrom) : null : undefined;
-  const importUntil = input2.importUntil !== undefined ? input2.importUntil ? new Date(input2.importUntil) : null : undefined;
-  await db4.$transaction(async (tx) => {
-    if (!input2.assigned) {
-      await tx.pancakePage.updateMany({
-        where: { shopId: input2.shopId, pageId: { in: pageIds } },
-        data: {
-          assigned: false,
-          syncEnabled: false
-        }
-      });
-    } else {
-      if (activePageIds.length) {
-        await tx.pancakePage.updateMany({
-          where: { shopId: input2.shopId, pageId: { in: activePageIds } },
-          data: {
-            assigned: true,
-            syncEnabled: input2.syncEnabled ?? true,
-            importFrom,
-            importUntil
-          }
-        });
-      }
-      if (nonActivePageIds.length) {
-        await tx.pancakePage.updateMany({
-          where: { shopId: input2.shopId, pageId: { in: nonActivePageIds } },
-          data: {
-            assigned: true,
-            syncEnabled: false,
-            importFrom,
-            importUntil
-          }
-        });
-      }
-    }
-    await writeAudit(tx, {
-      shopId: input2.shopId,
-      userId,
-      area: "settings",
-      action: input2.assigned ? "pancake_pages_assign" : "pancake_pages_unassign",
-      summary: `${input2.assigned ? "Gán" : "Bỏ gán"} ${pages.length} Page cho shop ${input2.shopId}.`
-    });
-  });
-  return {
-    updatedCount: pages.length,
-    activeSyncCount: input2.assigned ? activePageIds.length : 0,
-    missingTokenCount: input2.assigned ? nonActivePageIds.length : 0
-  };
-}
-async function configurePageSync(db4, userId, input2) {
-  await assertShopManager(db4, userId, input2.shopId);
-  const pageIds = [...new Set(input2.pageIds)];
-  const pages = await db4.pancakePage.findMany({
-    where: { shopId: input2.shopId, pageId: { in: pageIds } },
-    select: { pageId: true, tokenStatus: true }
-  });
-  const importFrom = input2.importFrom !== undefined ? input2.importFrom ? new Date(input2.importFrom) : null : undefined;
-  const importUntil = input2.importUntil !== undefined ? input2.importUntil ? new Date(input2.importUntil) : null : undefined;
-  await db4.$transaction(async (tx) => {
-    for (const page of pages) {
-      const canEnable = page.tokenStatus === "active";
-      const syncEnabled = input2.syncEnabled !== undefined ? input2.syncEnabled && canEnable : undefined;
-      await tx.pancakePage.update({
-        where: {
-          shopId_pageId: { shopId: input2.shopId, pageId: page.pageId }
-        },
-        data: {
-          syncEnabled,
-          assigned: syncEnabled !== undefined ? true : undefined,
-          importFrom,
-          importUntil
-        }
-      });
-      if (input2.resetCursor || importFrom !== undefined || importUntil !== undefined) {
-        await tx.pancakePageSyncCursor.upsert({
-          where: {
-            shopId_pageId: { shopId: input2.shopId, pageId: page.pageId }
-          },
-          create: {
-            shopId: input2.shopId,
-            pageId: page.pageId,
-            phase: "importing",
-            importFrom: importFrom ?? null,
-            importUntil: importUntil ?? null
-          },
-          update: {
-            phase: "importing",
-            lastConversationId: null,
-            pendingConversationId: null,
-            pendingMessageCount: 0,
-            importFrom,
-            windowStart: importFrom,
-            importUntil,
-            windowEnd: importUntil,
-            lastError: null,
-            lastErrorCode: null
-          }
-        });
-      }
-    }
-    await writeAudit(tx, {
-      shopId: input2.shopId,
-      userId,
-      area: "settings",
-      action: "pancake_pages_sync_config",
-      summary: `Cập nhật cấu hình đồng bộ cho ${pages.length} Page.`
-    });
-  });
-  return { updatedCount: pages.length };
-}
-async function setPageManualToken(db4, userId, input2) {
-  await assertShopManager(db4, userId, input2.shopId);
-  const token = input2.pageAccessToken.trim();
-  const encryptedAccessToken = encryptToken(token);
-  const tokenMaskedVal = maskToken(token);
-  await db4.$transaction(async (tx) => {
-    await tx.pancakePage.update({
-      where: {
-        shopId_pageId: { shopId: input2.shopId, pageId: input2.pageId }
-      },
-      data: {
-        encryptedAccessToken,
-        tokenMasked: tokenMaskedVal,
-        tokenStatus: "active",
-        tokenSource: "manual",
-        tokenReason: null,
-        lastError: null,
-        lastErrorCode: null,
-        assigned: true
-      }
-    });
-    await tx.pancakePageSyncCursor.upsert({
-      where: {
-        shopId_pageId: { shopId: input2.shopId, pageId: input2.pageId }
-      },
-      create: {
-        shopId: input2.shopId,
-        pageId: input2.pageId,
-        phase: "importing"
-      },
-      update: {
-        phase: "importing",
-        lastError: null,
-        lastErrorCode: null
-      }
-    });
-    await writeAudit(tx, {
-      shopId: input2.shopId,
-      userId,
-      area: "settings",
-      action: "pancake_page_token_manual",
-      summary: `Cập nhật thủ công Page Access Token cho Page ${input2.pageId} (${tokenMaskedVal}).`
-    });
-  });
-  return {
-    pageId: input2.pageId,
-    tokenMasked: tokenMaskedVal,
-    tokenStatus: "active"
-  };
-}
-async function confirmGeneratePageToken(db4, userId, input2, adapter = new PancakePagesClient) {
-  await assertShopManager(db4, userId, input2.shopId);
-  const page = await db4.pancakePage.findUnique({
-    where: {
-      shopId_pageId: { shopId: input2.shopId, pageId: input2.pageId }
-    }
-  });
-  if (!page) {
-    throw new PancakePagesApiError("CONFIGURATION_REQUIRED", "Không tìm thấy Page trong workspace này.");
-  }
-  if (page.roleInPage && page.roleInPage !== "ADMINISTER") {
-    const reason = `Không thể tạo Page Access Token vì tài khoản chỉ có quyền ${page.roleInPage} (yêu cầu quyền ADMINISTER).`;
-    await db4.pancakePage.update({
-      where: {
-        shopId_pageId: { shopId: input2.shopId, pageId: input2.pageId }
-      },
-      data: {
-        tokenStatus: "permission_denied",
-        tokenReason: reason,
-        lastError: reason,
-        lastErrorCode: "PERMISSION_DENIED"
-      }
-    });
-    throw new PancakePagesApiError("PERMISSION_DENIED", reason);
-  }
-  const userToken = await resolveUserAccessToken(db4, input2.shopId);
-  let newPageToken;
-  try {
-    newPageToken = await adapter.generatePageAccessToken(userToken, input2.pageId);
-  } catch (error53) {
-    const code = error53 instanceof PancakePagesApiError ? error53.code : "PERMISSION_DENIED";
-    const reason = error53 instanceof Error ? redactSecrets(error53.message) : "Không thể tạo Page Access Token.";
-    await db4.pancakePage.update({
-      where: {
-        shopId_pageId: { shopId: input2.shopId, pageId: input2.pageId }
-      },
-      data: {
-        tokenStatus: code === "TOKEN_EXPIRED_OR_REVOKED" ? "expired" : "permission_denied",
-        tokenReason: reason,
-        lastError: reason,
-        lastErrorCode: code
-      }
-    });
-    throw error53;
-  }
-  const encryptedAccessToken = encryptToken(newPageToken);
-  const tokenMaskedVal = maskToken(newPageToken);
-  await db4.$transaction(async (tx) => {
-    await tx.pancakePage.update({
-      where: {
-        shopId_pageId: { shopId: input2.shopId, pageId: input2.pageId }
-      },
-      data: {
-        encryptedAccessToken,
-        tokenMasked: tokenMaskedVal,
-        tokenStatus: "active",
-        tokenSource: "generated",
-        tokenReason: null,
-        lastError: null,
-        lastErrorCode: null,
-        assigned: true
-      }
-    });
-    await tx.pancakePageSyncCursor.upsert({
-      where: {
-        shopId_pageId: { shopId: input2.shopId, pageId: input2.pageId }
-      },
-      create: {
-        shopId: input2.shopId,
-        pageId: input2.pageId,
-        phase: "importing"
-      },
-      update: {
-        phase: "importing",
-        lastError: null,
-        lastErrorCode: null
-      }
-    });
-    await writeAudit(tx, {
-      shopId: input2.shopId,
-      userId,
-      area: "settings",
-      action: "pancake_page_token_generate",
-      summary: `Xác nhận tạo mới Page Access Token cho Page ${input2.pageId} (${tokenMaskedVal}).`
-    });
-  });
-  return {
-    pageId: input2.pageId,
-    tokenMasked: tokenMaskedVal,
-    tokenStatus: "active"
-  };
-}
-async function matchConversationCustomer(db4, input2, dialCode) {
-  const sourceIds = [
-    ...new Set(input2.sourceCustomerIds.map((id2) => id2.trim()).filter(Boolean))
-  ];
-  const psids = [
-    ...new Set(input2.psids.map((id2) => id2.trim()).filter((id2) => Boolean(id2) && id2 !== input2.pageId))
-  ];
-  const fbIdCandidates = [
-    ...new Set([
-      input2.conversationId,
-      ...psids,
-      ...psids.map((psid) => `${input2.pageId}_${psid}`)
-    ])
-  ];
-  const matchedCustomerIds = new Set;
-  if (sourceIds.length > 0) {
-    const directMatches = await db4.pancakeCustomer.findMany({
-      where: {
-        shopId: input2.shopId,
-        customerId: { in: sourceIds }
-      },
-      select: { customerId: true }
-    });
-    for (const row of directMatches) {
-      matchedCustomerIds.add(row.customerId);
-    }
-  }
-  const orderMatches = await db4.pancakeOrder.findMany({
-    where: {
-      shopId: input2.shopId,
-      customerId: { not: null },
-      raw: {
-        path: ["conversation_id"],
-        equals: input2.conversationId
-      }
-    },
-    select: { customerId: true },
-    take: 5
-  });
-  for (const row of orderMatches) {
-    if (row.customerId)
-      matchedCustomerIds.add(row.customerId);
-  }
-  if (matchedCustomerIds.size === 0 && sourceIds.length > 0) {
-    for (const sourceCustId of sourceIds.slice(0, 3)) {
-      const rawCustomerMatches = await db4.pancakeCustomer.findMany({
-        where: {
-          shopId: input2.shopId,
-          raw: {
-            path: ["customer_id"],
-            equals: sourceCustId
-          }
-        },
-        select: { customerId: true },
-        take: 5
-      });
-      for (const row of rawCustomerMatches) {
-        matchedCustomerIds.add(row.customerId);
-      }
-    }
-  }
-  if (matchedCustomerIds.size === 0 && fbIdCandidates.length > 0) {
-    for (const fbCandidate of fbIdCandidates.slice(0, 4)) {
-      const rawFbMatches = await db4.pancakeCustomer.findMany({
-        where: {
-          shopId: input2.shopId,
-          raw: {
-            path: ["fb_id"],
-            equals: fbCandidate
-          }
-        },
-        select: { customerId: true },
-        take: 5
-      });
-      for (const row of rawFbMatches) {
-        matchedCustomerIds.add(row.customerId);
-      }
-    }
-  }
-  const dial = dialCode !== undefined ? dialCode ?? undefined : PANCAKE.shopDialCode.get(input2.shopId);
-  const candidateTails = [
-    ...new Set(input2.phones.map((p2) => phoneTail(p2, dial)).filter((tail) => Boolean(tail)))
-  ];
-  const primaryTail = candidateTails[0] ?? null;
-  if (matchedCustomerIds.size === 1) {
-    return {
-      customerId: [...matchedCustomerIds][0] ?? null,
-      linkStatus: "linked_id",
-      matchedPhoneTail: primaryTail
-    };
-  }
-  if (matchedCustomerIds.size > 1) {
-    return {
-      customerId: null,
-      linkStatus: "ambiguous",
-      matchedPhoneTail: primaryTail
-    };
-  }
-  if (candidateTails.length > 0) {
-    const suffixFilters = candidateTails.map((tail) => ({
-      phone: { contains: tail.slice(-7) }
-    }));
-    const potentialCustomers = await db4.pancakeCustomer.findMany({
-      where: {
-        shopId: input2.shopId,
-        OR: suffixFilters
-      },
-      select: {
-        customerId: true,
-        phone: true,
-        raw: true
-      },
-      take: 25
-    });
-    const tailSet = new Set(candidateTails);
-    const phoneMatchedIds = new Set;
-    for (const cust of potentialCustomers) {
-      const directTail = phoneTail(cust.phone, dial);
-      if (directTail && tailSet.has(directTail)) {
-        phoneMatchedIds.add(cust.customerId);
-        continue;
-      }
-      const parsedRaw = customerRawPhoneSchema.safeParse(cust.raw);
-      const rawPhones = parsedRaw.success ? parsedRaw.data.phone_numbers ?? [] : [];
-      for (const rp of rawPhones) {
-        const rt = phoneTail(rp, dial);
-        if (rt && tailSet.has(rt)) {
-          phoneMatchedIds.add(cust.customerId);
-          break;
-        }
-      }
-    }
-    if (phoneMatchedIds.size === 1) {
-      return {
-        customerId: [...phoneMatchedIds][0] ?? null,
-        linkStatus: "linked_phone",
-        matchedPhoneTail: primaryTail
-      };
-    }
-    if (phoneMatchedIds.size > 1) {
-      return {
-        customerId: null,
-        linkStatus: "ambiguous",
-        matchedPhoneTail: primaryTail
-      };
-    }
-  }
-  return {
-    customerId: null,
-    linkStatus: "unlinked",
-    matchedPhoneTail: primaryTail
-  };
-}
-function classifyMessageSender(pageId, msg) {
-  const from = msg.from;
-  const senderId = from?.id ?? null;
-  const staffId = from?.admin_id ?? from?.uid ?? null;
-  const staffName = from?.admin_name ?? null;
-  if (staffId || staffName) {
-    return {
-      senderType: "staff",
-      senderId,
-      senderName: staffName ?? from?.name ?? "Nhân viên",
-      staffId,
-      staffName: staffName ?? from?.name ?? null
-    };
-  }
-  if (senderId && senderId === pageId) {
-    return {
-      senderType: "page",
-      senderId,
-      senderName: from?.name ?? "Page",
-      staffId: null,
-      staffName: null
-    };
-  }
-  return {
-    senderType: "customer",
-    senderId,
-    senderName: from?.name ?? "Khách hàng",
-    staffId: null,
-    staffName: null
-  };
-}
-async function storeMessagesBatch(db4, shopId2, pageId, conversationId, messages, fetchedAt) {
-  if (!messages.length)
-    return 0;
-  const byId = new Map;
-  for (const msg of messages) {
-    byId.set(msg.id, msg);
-  }
-  const uniqueMessages = [...byId.values()];
-  const existing = await db4.pancakeMessage.findMany({
-    where: {
-      shopId: shopId2,
-      pageId,
-      conversationId,
-      messageId: { in: uniqueMessages.map((m3) => m3.id) }
-    },
-    select: { messageId: true }
-  });
-  const existingSet = new Set(existing.map((e3) => e3.messageId));
-  const rows = uniqueMessages.map((msg) => {
-    const sender = classifyMessageSender(pageId, msg);
-    const insertedAt = msg.inserted_at ? sourceDate(msg.inserted_at) : fetchedAt;
-    return {
-      shopId: shopId2,
-      pageId,
-      conversationId,
-      messageId: msg.id,
-      type: msg.type ?? "INBOX",
-      senderType: sender.senderType,
-      senderId: sender.senderId,
-      senderName: sender.senderName,
-      staffId: sender.staffId,
-      staffName: sender.staffName,
-      message: msg.message ?? msg.original_message ?? "",
-      originalMessage: msg.original_message ?? null,
-      attachments: msg.attachments ?? [],
-      hasPhone: msg.has_phone ?? false,
-      seen: msg.seen ?? false,
-      isRemoved: msg.is_removed ?? false,
-      isHidden: msg.is_hidden ?? false,
-      parentId: msg.parent_id ?? null,
-      sourceInsertedAt: insertedAt,
-      fetchedAt,
-      raw: msg
-    };
-  });
-  const newRows = rows.filter((r2) => !existingSet.has(r2.messageId));
-  if (newRows.length > 0) {
-    await db4.pancakeMessage.createMany({
-      data: newRows,
-      skipDuplicates: true
-    });
-  }
-  for (const row of rows) {
-    if (!existingSet.has(row.messageId))
-      continue;
-    await db4.pancakeMessage.update({
-      where: {
-        shopId_pageId_conversationId_messageId: {
-          shopId: shopId2,
-          pageId,
-          conversationId,
-          messageId: row.messageId
-        }
-      },
-      data: {
-        message: row.message,
-        originalMessage: row.originalMessage,
-        attachments: row.attachments,
-        hasPhone: row.hasPhone,
-        seen: row.seen,
-        isRemoved: row.isRemoved,
-        isHidden: row.isHidden,
-        fetchedAt: row.fetchedAt,
-        raw: row.raw
-      }
-    });
-  }
-  return newRows.length;
-}
-async function upsertConversationWithContext(db4, shopId2, pageId, conv, msgPage, messagesComplete, nextMessageCount, fetchedAt, dialCode) {
-  const sourceCustomerIds = [
-    conv.customer_id,
-    conv.page_customer?.customer_id,
-    ...(conv.customers ?? []).map((c) => c.customer_id),
-    ...(msgPage?.customers ?? []).map((c) => c.customer_id)
-  ].filter((id2) => Boolean(id2?.trim()));
-  const pageCustomerIds = [
-    conv.page_customer?.id,
-    ...(conv.customers ?? []).map((c) => c.id),
-    ...(msgPage?.customers ?? []).map((c) => c.id),
-    ...(msgPage?.convCustomers ?? []).map((c) => c.id)
-  ].filter((id2) => Boolean(id2?.trim()));
-  const psids = [
-    conv.page_customer?.psid,
-    conv.from?.id,
-    ...(conv.customers ?? []).map((c) => c.fb_id),
-    msgPage?.convFrom?.id,
-    ...(msgPage?.customers ?? []).map((c) => c.fb_id),
-    ...(msgPage?.convCustomers ?? []).map((c) => c.fb_id)
-  ].filter((id2) => Boolean(id2?.trim()));
-  const phones = [
-    ...extractPhones(conv.recent_phone_numbers),
-    ...msgPage?.phones ?? [],
-    ...(msgPage?.customers ?? []).flatMap((c) => [
-      ...extractPhones(c.recent_phone_numbers),
-      ...(c.shop_customer_addresses ?? []).map((a3) => a3.phone_number).filter((p2) => Boolean(p2?.trim()))
-    ])
-  ];
-  const match = await matchConversationCustomer(db4, {
-    shopId: shopId2,
-    pageId,
-    conversationId: conv.id,
-    sourceCustomerIds,
-    pageCustomerIds,
-    psids,
-    phones
-  }, dialCode);
-  const customerName = conv.customers?.[0]?.name?.trim() || conv.page_customer?.name?.trim() || msgPage?.customers?.[0]?.name?.trim() || msgPage?.convFrom?.name?.trim() || (conv.from?.id !== pageId ? conv.from?.name?.trim() : null) || "Khách hội thoại";
-  const customerPhone = phones[0] ?? null;
-  const sourceInsertedAt = conv.inserted_at ? sourceDate(conv.inserted_at) : null;
-  const sourceUpdatedAt = conv.updated_at ? sourceDate(conv.updated_at) : sourceInsertedAt ?? fetchedAt;
-  const canInbox = msgPage?.canInbox ?? msgPage?.customers?.[0]?.can_inbox ?? true;
-  const isReplied = conv.is_replied ?? Boolean(conv.last_sent_by?.admin_id || conv.last_sent_by?.uid || conv.last_sent_by?.id === pageId);
-  const convData = {
-    type: conv.type ?? "INBOX",
-    customerId: match.customerId,
-    linkStatus: match.linkStatus,
-    sourceCustomerId: sourceCustomerIds[0] ?? null,
-    pageCustomerId: pageCustomerIds[0] ?? null,
-    psid: psids.find((id2) => id2 !== pageId) ?? null,
-    customerName,
-    customerPhone,
-    phoneTail: match.matchedPhoneTail,
-    snippet: conv.snippet ?? null,
-    seen: conv.seen ?? false,
-    isReplied,
-    canInbox,
-    messageCount: conv.message_count ?? msgPage?.messages.length ?? 0,
-    assigneeIds: conv.assignee_ids ?? [],
-    tags: conv.tags ?? [],
-    version: conv.version ?? undefined,
-    messagesComplete,
-    nextMessageCount,
-    sourceInsertedAt,
-    sourceUpdatedAt,
-    fetchedAt,
-    raw: conv
-  };
-  await db4.pancakeConversation.upsert({
-    where: {
-      shopId_pageId_conversationId: {
-        shopId: shopId2,
-        pageId,
-        conversationId: conv.id
-      }
-    },
-    create: {
-      shopId: shopId2,
-      pageId,
-      conversationId: conv.id,
-      ...convData
-    },
-    update: convData
-  });
-  let writtenMessages = 0;
-  if (msgPage?.messages.length) {
-    writtenMessages = await storeMessagesBatch(db4, shopId2, pageId, conv.id, msgPage.messages, fetchedAt);
-  }
-  return {
-    customerId: match.customerId,
-    linkStatus: match.linkStatus,
-    writtenMessages
-  };
-}
-async function syncPageConversations(db4, shopId2, pageId, adapter = new PancakePagesClient, options = {}) {
-  const now2 = options.now ?? new Date;
-  const conversationBudget = options.conversationBudget ?? PANCAKE.conversationPageBudget;
-  const messageBudget = options.messageBudget ?? PANCAKE.messagePageBudget;
-  const page = await db4.pancakePage.findUnique({
-    where: { shopId_pageId: { shopId: shopId2, pageId } }
-  });
-  if (!page || !page.assigned || !page.syncEnabled) {
-    return {
-      pageId,
-      phase: "idle",
-      complete: true,
-      conversationsProcessed: 0,
-      messagesWritten: 0
-    };
-  }
-  if (!page.encryptedAccessToken || page.tokenStatus === "missing" || page.tokenStatus === "permission_denied" || page.tokenStatus === "expired" || page.tokenStatus === "revoked") {
-    return {
-      pageId,
-      phase: "paused_auth",
-      complete: false,
-      conversationsProcessed: 0,
-      messagesWritten: 0,
-      errorCode: page.tokenStatus === "permission_denied" ? "PERMISSION_DENIED" : "TOKEN_EXPIRED_OR_REVOKED",
-      errorMessage: page.tokenReason ?? "Page chưa có token hợp lệ hoặc cần kết nối lại."
-    };
-  }
-  let pageAccessToken;
-  try {
-    pageAccessToken = decryptToken(page.encryptedAccessToken);
-  } catch {
-    const reason = "Không thể giải mã Page Access Token. Vui lòng kết nối lại.";
-    await db4.pancakePage.update({
-      where: { shopId_pageId: { shopId: shopId2, pageId } },
-      data: {
-        tokenStatus: "invalid",
-        tokenReason: reason,
-        lastError: reason,
-        lastErrorCode: "TOKEN_EXPIRED_OR_REVOKED"
-      }
-    });
-    return {
-      pageId,
-      phase: "paused_auth",
-      complete: false,
-      conversationsProcessed: 0,
-      messagesWritten: 0,
-      errorCode: "TOKEN_EXPIRED_OR_REVOKED",
-      errorMessage: reason
-    };
-  }
-  const settings = await effectiveSettings(db4, shopId2);
-  const dialCode = settings.dialCode;
-  const cursorKey = { shopId_pageId: { shopId: shopId2, pageId } };
-  let cursor = await db4.pancakePageSyncCursor.upsert({
-    where: cursorKey,
-    create: {
-      shopId: shopId2,
-      pageId,
-      phase: "importing",
-      importFrom: page.importFrom,
-      importUntil: page.importUntil
-    },
-    update: {}
-  });
-  if (!cursor.windowEnd || cursor.phase === "idle" || cursor.phase === "paused_auth") {
-    const isImporting = cursor.phase !== "incremental";
-    const defaultStart = new Date(now2.getTime() - PANCAKE.defaultImportDays * PANCAKE.dayMs);
-    const windowStart = isImporting ? cursor.importFrom ?? page.importFrom ?? defaultStart : new Date(Math.max(0, (cursor.watermark?.getTime() ?? now2.getTime() - PANCAKE.recentWindowMs) - PANCAKE.overlapMs));
-    const windowEnd = isImporting ? cursor.importUntil ?? page.importUntil ?? now2 : now2;
-    cursor = await db4.pancakePageSyncCursor.update({
-      where: cursorKey,
-      data: {
-        phase: isImporting ? "importing" : "incremental",
-        windowStart,
-        windowEnd,
-        lastError: null,
-        lastErrorCode: null
-      }
-    });
-  }
-  let conversationsProcessed = 0;
-  let messagesWritten = 0;
-  let messageCallsUsed = 0;
-  try {
-    if (cursor.pendingConversationId) {
-      const pendingConvId = cursor.pendingConversationId;
-      let offset = cursor.pendingMessageCount;
-      let finishedPending = false;
-      while (messageCallsUsed < messageBudget) {
-        const fetchedAt = new Date;
-        const msgPage = await adapter.listMessages(pageId, pendingConvId, pageAccessToken, offset);
-        messageCallsUsed++;
-        const written = await storeMessagesBatch(db4, shopId2, pageId, pendingConvId, msgPage.messages, fetchedAt);
-        messagesWritten += written;
-        offset += msgPage.messages.length;
-        if (msgPage.messages.length < PANCAKE.messageBatchSize) {
-          finishedPending = true;
-          break;
-        }
-      }
-      await db4.$transaction([
-        db4.pancakeConversation.updateMany({
-          where: { shopId: shopId2, pageId, conversationId: pendingConvId },
-          data: {
-            messagesComplete: finishedPending,
-            nextMessageCount: offset
-          }
-        }),
-        db4.pancakePageSyncCursor.update({
-          where: cursorKey,
-          data: {
-            pendingConversationId: finishedPending ? null : pendingConvId,
-            pendingMessageCount: finishedPending ? 0 : offset,
-            syncedMessages: { increment: messagesWritten }
-          }
-        })
-      ]);
-      cursor = await db4.pancakePageSyncCursor.findUniqueOrThrow({
-        where: cursorKey
-      });
-      if (!finishedPending) {
-        await db4.pancakePage.update({
-          where: { shopId_pageId: { shopId: shopId2, pageId } },
-          data: { lastSyncAt: new Date, lastError: null, lastErrorCode: null }
-        });
-        return {
-          pageId,
-          phase: cursor.phase,
-          complete: false,
-          conversationsProcessed,
-          messagesWritten
-        };
-      }
-    }
-    let conversationBatches = 0;
-    while (conversationBatches < conversationBudget && messageCallsUsed < messageBudget) {
-      const sinceSec = cursor.windowStart ? Math.floor(cursor.windowStart.getTime() / 1000) : undefined;
-      const untilSec = cursor.windowEnd ? Math.floor(cursor.windowEnd.getTime() / 1000) : undefined;
-      const conversations = await adapter.listConversations(pageId, pageAccessToken, {
-        lastConversationId: cursor.lastConversationId ?? undefined,
-        since: sinceSec,
-        until: untilSec,
-        orderBy: "updated_at"
-      });
-      conversationBatches++;
-      if (conversations.length === 0) {
-        const completedAt = new Date;
-        await db4.$transaction([
-          db4.pancakePageSyncCursor.update({
-            where: cursorKey,
-            data: {
-              phase: "incremental",
-              lastConversationId: null,
-              pendingConversationId: null,
-              pendingMessageCount: 0,
-              watermark: cursor.windowEnd ?? completedAt,
-              windowStart: null,
-              windowEnd: null,
-              lastSuccessAt: completedAt,
-              lastError: null,
-              lastErrorCode: null
-            }
-          }),
-          db4.pancakePage.update({
-            where: { shopId_pageId: { shopId: shopId2, pageId } },
-            data: {
-              lastSyncAt: completedAt,
-              lastSuccessAt: completedAt,
-              lastError: null,
-              lastErrorCode: null
-            }
-          })
-        ]);
-        return {
-          pageId,
-          phase: "incremental",
-          complete: true,
-          conversationsProcessed,
-          messagesWritten
-        };
-      }
-      const existingConvs = await db4.pancakeConversation.findMany({
-        where: {
-          shopId: shopId2,
-          pageId,
-          conversationId: { in: conversations.map((c) => c.id) }
-        },
-        select: {
-          conversationId: true,
-          sourceUpdatedAt: true,
-          messagesComplete: true,
-          nextMessageCount: true
-        }
-      });
-      const existingMap = new Map(existingConvs.map((c) => [c.conversationId, c]));
-      for (const conv of conversations) {
-        const fetchedAt = new Date;
-        const existing = existingMap.get(conv.id);
-        const convUpdated = conv.updated_at ? sourceDate(conv.updated_at) : conv.inserted_at ? sourceDate(conv.inserted_at) : fetchedAt;
-        const needsMessageSync = !existing || !existing.messagesComplete || convUpdated > existing.sourceUpdatedAt;
-        let firstMsgPage = null;
-        let offset = 0;
-        let convMessagesComplete = existing?.messagesComplete ?? false;
-        let convMessagesWritten = 0;
-        if (needsMessageSync && messageCallsUsed < messageBudget) {
-          firstMsgPage = await adapter.listMessages(pageId, conv.id, pageAccessToken, 0);
-          messageCallsUsed++;
-          offset = firstMsgPage.messages.length;
-          convMessagesComplete = firstMsgPage.messages.length < PANCAKE.messageBatchSize;
-        }
-        const upserted = await withDbRetry(() => upsertConversationWithContext(db4, shopId2, pageId, conv, firstMsgPage, convMessagesComplete, offset, fetchedAt, dialCode));
-        convMessagesWritten += upserted.writtenMessages;
-        if (needsMessageSync && !convMessagesComplete && cursor.phase === "importing") {
-          while (messageCallsUsed < messageBudget && !convMessagesComplete) {
-            const olderPage = await adapter.listMessages(pageId, conv.id, pageAccessToken, offset);
-            messageCallsUsed++;
-            const written = await storeMessagesBatch(db4, shopId2, pageId, conv.id, olderPage.messages, new Date);
-            convMessagesWritten += written;
-            offset += olderPage.messages.length;
-            if (olderPage.messages.length < PANCAKE.messageBatchSize) {
-              convMessagesComplete = true;
-            }
-          }
-          await db4.pancakeConversation.update({
-            where: {
-              shopId_pageId_conversationId: {
-                shopId: shopId2,
-                pageId,
-                conversationId: conv.id
-              }
-            },
-            data: {
-              messagesComplete: convMessagesComplete,
-              nextMessageCount: offset
-            }
-          });
-        }
-        conversationsProcessed++;
-        messagesWritten += convMessagesWritten;
-        const pausedMidConversation = needsMessageSync && !convMessagesComplete && cursor.phase === "importing";
-        cursor = await db4.pancakePageSyncCursor.update({
-          where: cursorKey,
-          data: {
-            lastConversationId: conv.id,
-            pendingConversationId: pausedMidConversation ? conv.id : null,
-            pendingMessageCount: pausedMidConversation ? offset : 0,
-            syncedConversations: existing ? undefined : { increment: 1 },
-            syncedMessages: convMessagesWritten > 0 ? { increment: convMessagesWritten } : undefined,
-            lastError: null,
-            lastErrorCode: null
-          }
-        });
-        if (pausedMidConversation || messageCallsUsed >= messageBudget) {
-          await db4.pancakePage.update({
-            where: { shopId_pageId: { shopId: shopId2, pageId } },
-            data: {
-              lastSyncAt: new Date,
-              lastError: null,
-              lastErrorCode: null
-            }
-          });
-          return {
-            pageId,
-            phase: cursor.phase,
-            complete: false,
-            conversationsProcessed,
-            messagesWritten
-          };
-        }
-      }
-      if (conversations.length < PANCAKE.conversationBatchSize) {
-        const completedAt = new Date;
-        await db4.$transaction([
-          db4.pancakePageSyncCursor.update({
-            where: cursorKey,
-            data: {
-              phase: "incremental",
-              lastConversationId: null,
-              pendingConversationId: null,
-              pendingMessageCount: 0,
-              watermark: cursor.windowEnd ?? completedAt,
-              windowStart: null,
-              windowEnd: null,
-              lastSuccessAt: completedAt,
-              lastError: null,
-              lastErrorCode: null
-            }
-          }),
-          db4.pancakePage.update({
-            where: { shopId_pageId: { shopId: shopId2, pageId } },
-            data: {
-              lastSyncAt: completedAt,
-              lastSuccessAt: completedAt,
-              lastError: null,
-              lastErrorCode: null
-            }
-          })
-        ]);
-        return {
-          pageId,
-          phase: "incremental",
-          complete: true,
-          conversationsProcessed,
-          messagesWritten
-        };
-      }
-    }
-    await db4.pancakePage.update({
-      where: { shopId_pageId: { shopId: shopId2, pageId } },
-      data: {
-        lastSyncAt: new Date,
-        lastError: null,
-        lastErrorCode: null
-      }
-    });
-    return {
-      pageId,
-      phase: cursor.phase,
-      complete: false,
-      conversationsProcessed,
-      messagesWritten
-    };
-  } catch (error53) {
-    const code = error53 instanceof PancakePagesApiError ? error53.code : "UNKNOWN_ERROR";
-    const message2 = error53 instanceof Error ? redactSecrets(error53.message).slice(0, PANCAKE.logMessageMax) : "Lỗi đồng bộ hội thoại";
-    const isAuthFailure = code === "TOKEN_EXPIRED_OR_REVOKED" || code === "PERMISSION_DENIED";
-    logSync({
-      event: "page_sync_failed",
-      shopId: shopId2,
-      pageId,
-      code,
-      message: message2
-    });
-    await db4.$transaction([
-      db4.pancakePage.update({
-        where: { shopId_pageId: { shopId: shopId2, pageId } },
-        data: {
-          lastSyncAt: new Date,
-          lastError: message2,
-          lastErrorCode: code,
-          tokenStatus: isAuthFailure ? code === "PERMISSION_DENIED" ? "permission_denied" : "expired" : undefined,
-          tokenReason: isAuthFailure ? message2 : undefined
-        }
-      }),
-      db4.pancakePageSyncCursor.update({
-        where: cursorKey,
-        data: {
-          phase: isAuthFailure ? "paused_auth" : undefined,
-          lastError: message2,
-          lastErrorCode: code
-        }
-      })
-    ]);
-    return {
-      pageId,
-      phase: isAuthFailure ? "paused_auth" : cursor.phase,
-      complete: false,
-      conversationsProcessed,
-      messagesWritten,
-      errorCode: code,
-      errorMessage: message2
-    };
-  }
-}
-async function syncShopPages(db4, shopId2, adapter = new PancakePagesClient, options = {}) {
-  const pages = await db4.pancakePage.findMany({
-    where: {
-      shopId: shopId2,
-      assigned: true,
-      syncEnabled: true,
-      tokenStatus: "active",
-      pageId: options.pageIds?.length ? { in: options.pageIds } : undefined
-    },
-    select: { pageId: true },
-    orderBy: [{ lastSyncAt: "asc" }, { pageId: "asc" }]
-  });
-  if (!pages.length) {
-    return {
-      pagesProcessed: 0,
-      conversationsProcessed: 0,
-      messagesWritten: 0,
-      outcomes: []
-    };
-  }
-  const concurrency = Math.max(1, options.concurrency ?? PANCAKE.pageSyncConcurrency);
-  const outcomes = [];
-  let index = 0;
-  async function workerLoop() {
-    while (index < pages.length) {
-      const current = pages[index++];
-      if (!current)
-        break;
-      const outcome = await syncPageConversations(db4, shopId2, current.pageId, adapter, {
-        conversationBudget: options.conversationBudget,
-        messageBudget: options.messageBudget
-      });
-      outcomes.push(outcome);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, pages.length) }, () => workerLoop()));
-  return {
-    pagesProcessed: outcomes.length,
-    conversationsProcessed: outcomes.reduce((sum, o3) => sum + o3.conversationsProcessed, 0),
-    messagesWritten: outcomes.reduce((sum, o3) => sum + o3.messagesWritten, 0),
-    outcomes
-  };
-}
-async function syncPagesNow(db4, userId, input2, adapter = new PancakePagesClient) {
-  await assertShopManager(db4, userId, input2.shopId);
-  return syncShopPages(db4, input2.shopId, adapter, {
-    pageIds: input2.pageIds,
-    conversationBudget: input2.conversationBudget,
-    messageBudget: input2.messageBudget
-  });
-}
-var pageWebhookPayload = exports_external.object({
-  page_id: sourceId.optional(),
-  event_type: exports_external.enum([
-    "messaging",
-    "conversation",
-    "connect_status",
-    "post",
-    "subscription"
-  ]),
-  request_id: exports_external.string().nullish(),
-  timestamp: exports_external.number().int().nullish(),
-  data: exports_external.object({
-    conversation: conversationWire.optional(),
-    message: messageWire.optional(),
-    connect_status: exports_external.enum(["connected", "disconnected"]).optional(),
-    page_id: sourceId.optional()
-  }).passthrough()
-}).passthrough();
-async function ingestPageWebhook(db4, rawBody, explicitShopId) {
-  const parsed = pageWebhookPayload.parse(JSON.parse(rawBody));
-  const pageId = parsed.page_id ?? parsed.data.page_id ?? parsed.data.message?.page_id ?? parsed.data.conversation?.page_id;
-  if (!pageId) {
-    throw new Error("PAGE_ID_REQUIRED");
-  }
-  const pageRows = await db4.pancakePage.findMany({
-    where: {
-      pageId,
-      shopId: explicitShopId
-    },
-    orderBy: [{ assigned: "desc" }, { syncEnabled: "desc" }]
-  });
-  let targetShopId = explicitShopId ?? pageRows[0]?.shopId;
-  if (!targetShopId) {
-    const fallbackShop = await db4.pancakeShop.findFirst({
-      orderBy: { id: "asc" },
-      select: { id: true }
-    });
-    if (!fallbackShop)
-      throw new Error("SHOP_NOT_FOUND");
-    targetShopId = fallbackShop.id;
-  }
-  if (pageRows.length === 0) {
-    await db4.pancakePage.upsert({
-      where: {
-        shopId_pageId: { shopId: targetShopId, pageId }
-      },
-      create: {
-        shopId: targetShopId,
-        pageId,
-        name: `Page ${pageId}`,
-        platform: "facebook",
-        assigned: true
-      },
-      update: {}
-    });
-  }
-  const dedupeKey = parsed.request_id?.trim() || createHash6("sha256").update(rawBody).digest("hex");
-  const existingEvent = await db4.pancakePageWebhookEvent.findUnique({
-    where: {
-      shopId_pageId_dedupeKey: {
-        shopId: targetShopId,
-        pageId,
-        dedupeKey
-      }
-    }
-  });
-  if (existingEvent) {
-    return {
-      accepted: true,
-      duplicate: true,
-      stale: existingEvent.status === "ignored_stale",
-      shopId: targetShopId,
-      pageId,
-      eventType: parsed.event_type
-    };
-  }
-  const now2 = new Date;
-  const incomingVersion = parsed.data.conversation?.version ?? null;
-  let stale = false;
-  if ((parsed.event_type === "conversation" || parsed.event_type === "messaging") && parsed.data.conversation) {
-    const conv = parsed.data.conversation;
-    const existingConv = await db4.pancakeConversation.findUnique({
-      where: {
-        shopId_pageId_conversationId: {
-          shopId: targetShopId,
-          pageId,
-          conversationId: conv.id
-        }
-      },
-      select: {
-        version: true,
-        sourceUpdatedAt: true,
-        messagesComplete: true,
-        nextMessageCount: true
-      }
-    });
-    const eventTime2 = parsed.data.message?.inserted_at ? sourceDate(parsed.data.message.inserted_at) : conv.updated_at ? sourceDate(conv.updated_at) : parsed.timestamp ? new Date(parsed.timestamp * 1000) : now2;
-    if (parsed.event_type === "conversation" && existingConv?.version !== null && existingConv?.version !== undefined && incomingVersion !== null && incomingVersion <= existingConv.version) {
-      stale = true;
-    } else if (parsed.event_type === "conversation" && incomingVersion === null && existingConv && eventTime2 < existingConv.sourceUpdatedAt) {
-      stale = true;
-    }
-    if (!stale) {
-      const settings = await effectiveSettings(db4, targetShopId);
-      const isOutdatedConvMeta = existingConv && (existingConv.version !== null && incomingVersion !== null && incomingVersion < existingConv.version || eventTime2 < existingConv.sourceUpdatedAt);
-      if (!isOutdatedConvMeta) {
-        const syntheticMsgPage = parsed.data.message ? {
-          messages: [parsed.data.message],
-          customers: [],
-          convCustomers: conv.customers ?? [],
-          convFrom: conv.from ?? null,
-          canInbox: true,
-          phones: extractPhones(parsed.data.message.phone_info)
-        } : null;
-        const convWithUpdated = {
-          ...conv,
-          updated_at: conv.updated_at ?? parsed.data.message?.inserted_at ?? eventTime2.toISOString().replace(/Z$/, "")
-        };
-        await upsertConversationWithContext(db4, targetShopId, pageId, convWithUpdated, syntheticMsgPage, existingConv?.messagesComplete ?? false, existingConv?.nextMessageCount ?? 0, now2, settings.dialCode);
-      } else if (parsed.data.message) {
-        await storeMessagesBatch(db4, targetShopId, pageId, conv.id, [parsed.data.message], now2);
-      }
-    }
-  }
-  if (parsed.event_type === "connect_status" && parsed.data.connect_status) {
-    const isDisconnected = parsed.data.connect_status === "disconnected";
-    await db4.pancakePage.update({
-      where: { shopId_pageId: { shopId: targetShopId, pageId } },
-      data: {
-        connectStatus: parsed.data.connect_status,
-        lastWebhookAt: now2,
-        lastError: isDisconnected ? "Page bị mất kết nối với nền tảng (disconnected). Vui lòng kết nối lại trên Pancake." : undefined,
-        lastErrorCode: isDisconnected ? "PAGE_DISCONNECTED" : undefined
-      }
-    });
-  } else {
-    await db4.pancakePage.update({
-      where: { shopId_pageId: { shopId: targetShopId, pageId } },
-      data: { lastWebhookAt: now2 }
-    });
-  }
-  await db4.pancakePageWebhookEvent.upsert({
-    where: {
-      shopId_pageId_dedupeKey: {
-        shopId: targetShopId,
-        pageId,
-        dedupeKey
-      }
-    },
-    create: {
-      shopId: targetShopId,
-      pageId,
-      dedupeKey,
-      eventType: parsed.event_type,
-      requestId: parsed.request_id ?? null,
-      eventTimestamp: parsed.timestamp ?? null,
-      version: incomingVersion,
-      status: stale ? "ignored_stale" : "processed",
-      payload: parsed,
-      processedAt: now2
-    },
-    update: {}
-  });
-  return {
-    accepted: true,
-    duplicate: false,
-    stale,
-    shopId: targetShopId,
-    pageId,
-    eventType: parsed.event_type
-  };
-}
-async function listConversations(db4, userId, input2) {
-  const grants = await assertShopReader(db4, userId, input2.shopId);
-  const q2 = input2.q.trim();
-  const where = {
-    shopId: input2.shopId,
-    pageId: input2.pageId,
-    customerId: input2.customerId ?? (input2.linkStatus === "linked" ? { not: null } : undefined),
-    seen: input2.unreadOnly ? false : undefined,
-    linkStatus: input2.linkStatus === "unlinked" ? "unlinked" : input2.linkStatus === "ambiguous" ? "ambiguous" : undefined,
-    OR: q2 ? [
-      { customerName: { contains: q2, mode: "insensitive" } },
-      { customerPhone: { contains: q2 } },
-      { snippet: { contains: q2, mode: "insensitive" } },
-      { conversationId: { contains: q2 } }
-    ] : undefined
-  };
-  const [rows, total, pages] = await Promise.all([
-    db4.pancakeConversation.findMany({
-      where,
-      include: {
-        page: {
-          select: {
-            name: true,
-            platform: true,
-            avatarUrl: true,
-            tokenStatus: true,
-            connectStatus: true
-          }
-        },
-        customer: {
-          select: {
-            customerId: true,
-            name: true,
-            phone: true
-          }
-        }
-      },
-      orderBy: [{ sourceUpdatedAt: "desc" }, { conversationId: "asc" }],
-      skip: (input2.page - 1) * input2.pageSize,
-      take: input2.pageSize
-    }),
-    db4.pancakeConversation.count({ where }),
-    db4.pancakePage.findMany({
-      where: { shopId: input2.shopId, assigned: true },
-      select: {
-        pageId: true,
-        name: true,
-        platform: true,
-        tokenStatus: true
-      },
-      orderBy: { name: "asc" }
-    })
-  ]);
-  return {
-    canWrite: canWrite(grants, input2.shopId),
-    total,
-    pages,
-    rows: rows.map((row) => ({
-      shopId: row.shopId,
-      pageId: row.pageId,
-      pageName: row.page.name,
-      platform: row.page.platform,
-      pageAvatarUrl: row.page.avatarUrl,
-      pageTokenStatus: row.page.tokenStatus,
-      pageConnectStatus: row.page.connectStatus,
-      conversationId: row.conversationId,
-      type: row.type,
-      customerId: row.customerId,
-      linkedCustomerName: row.customer?.name ?? null,
-      linkedCustomerPhone: row.customer?.phone ?? null,
-      linkStatus: row.linkStatus,
-      customerName: row.customerName,
-      customerPhone: row.customerPhone,
-      snippet: row.snippet,
-      seen: row.seen,
-      isReplied: row.isReplied,
-      canInbox: row.canInbox,
-      messageCount: row.messageCount,
-      messagesComplete: row.messagesComplete,
-      sourceInsertedAt: row.sourceInsertedAt?.toISOString() ?? null,
-      sourceUpdatedAt: row.sourceUpdatedAt.toISOString()
-    }))
-  };
-}
-async function conversationMessages(db4, userId, input2, adapter = new PancakePagesClient) {
-  const grants = await assertShopReader(db4, userId, input2.shopId);
-  const conversation = await db4.pancakeConversation.findUnique({
-    where: {
-      shopId_pageId_conversationId: {
-        shopId: input2.shopId,
-        pageId: input2.pageId,
-        conversationId: input2.conversationId
-      }
-    },
-    include: {
-      page: true,
-      customer: {
-        select: {
-          customerId: true,
-          name: true,
-          phone: true,
-          email: true
-        }
-      }
-    }
-  });
-  if (!conversation) {
-    throw new PancakePagesApiError("CONFIGURATION_REQUIRED", "Không tìm thấy hội thoại trong workspace này.");
-  }
-  if (input2.fetchRemoteOlder && !conversation.messagesComplete && conversation.page.encryptedAccessToken && conversation.page.tokenStatus === "active") {
-    try {
-      const pat = decryptToken(conversation.page.encryptedAccessToken);
-      const offset = conversation.nextMessageCount;
-      const older = await adapter.listMessages(input2.pageId, input2.conversationId, pat, offset);
-      await storeMessagesBatch(db4, input2.shopId, input2.pageId, input2.conversationId, older.messages, new Date);
-      const newOffset = offset + older.messages.length;
-      const complete = older.messages.length < PANCAKE.messageBatchSize;
-      await db4.pancakeConversation.update({
-        where: {
-          shopId_pageId_conversationId: {
-            shopId: input2.shopId,
-            pageId: input2.pageId,
-            conversationId: input2.conversationId
-          }
-        },
-        data: {
-          messagesComplete: complete,
-          nextMessageCount: newOffset,
-          canInbox: older.canInbox
-        }
-      });
-      conversation.messagesComplete = complete;
-      conversation.nextMessageCount = newOffset;
-      conversation.canInbox = older.canInbox;
-    } catch (error53) {
-      logSync({
-        event: "lazy_messages_fetch_failed",
-        shopId: input2.shopId,
-        pageId: input2.pageId,
-        conversationId: input2.conversationId,
-        code: error53 instanceof PancakePagesApiError ? error53.code : "UNKNOWN_ERROR"
-      });
-    }
-  }
-  const beforeDate = input2.beforeInsertedAt ? new Date(input2.beforeInsertedAt) : undefined;
-  const where = {
-    shopId: input2.shopId,
-    pageId: input2.pageId,
-    conversationId: input2.conversationId,
-    OR: beforeDate ? [
-      { sourceInsertedAt: { lt: beforeDate } },
-      ...input2.beforeMessageId ? [
-        {
-          sourceInsertedAt: beforeDate,
-          messageId: { lt: input2.beforeMessageId }
-        }
-      ] : []
-    ] : undefined
-  };
-  const [rowsDesc, totalCount, outbound] = await Promise.all([
-    db4.pancakeMessage.findMany({
-      where,
-      orderBy: [{ sourceInsertedAt: "desc" }, { messageId: "desc" }],
-      take: input2.limit + 1
-    }),
-    db4.pancakeMessage.count({
-      where: {
-        shopId: input2.shopId,
-        pageId: input2.pageId,
-        conversationId: input2.conversationId
-      }
-    }),
-    db4.pancakeOutboundMessage.findMany({
-      where: {
-        shopId: input2.shopId,
-        pageId: input2.pageId,
-        conversationId: input2.conversationId,
-        status: { in: ["sending", "failed"] }
-      },
-      orderBy: { createdAt: "asc" },
-      take: 20
-    })
-  ]);
-  const hasOlderInDb = rowsDesc.length > input2.limit;
-  const sliceDesc = hasOlderInDb ? rowsDesc.slice(0, input2.limit) : rowsDesc;
-  const chronological = [...sliceDesc].reverse();
-  const oldestLoaded = chronological[0];
-  return {
-    canWrite: canWrite(grants, input2.shopId),
-    conversation: {
-      shopId: conversation.shopId,
-      pageId: conversation.pageId,
-      pageName: conversation.page.name,
-      platform: conversation.page.platform,
-      pageTokenStatus: conversation.page.tokenStatus,
-      pageTokenReason: conversation.page.tokenReason,
-      conversationId: conversation.conversationId,
-      type: conversation.type,
-      customerId: conversation.customerId,
-      customer: conversation.customer,
-      linkStatus: conversation.linkStatus,
-      customerName: conversation.customerName,
-      customerPhone: conversation.customerPhone,
-      seen: conversation.seen,
-      isReplied: conversation.isReplied,
-      canInbox: conversation.canInbox,
-      messageCount: Math.max(conversation.messageCount, totalCount),
-      messagesComplete: conversation.messagesComplete,
-      sourceUpdatedAt: conversation.sourceUpdatedAt.toISOString()
-    },
-    hasMoreOlder: hasOlderInDb || !conversation.messagesComplete,
-    hasOlderInDb,
-    nextCursor: oldestLoaded ? {
-      beforeInsertedAt: oldestLoaded.sourceInsertedAt.toISOString(),
-      beforeMessageId: oldestLoaded.messageId
-    } : null,
-    messages: chronological.map((msg) => {
-      const parsedAttachments = storedAttachmentSchema.safeParse(msg.attachments);
-      const attachments = (parsedAttachments.success ? parsedAttachments.data : []).map((item) => ({
-        id: item.id ?? null,
-        type: item.type ?? null,
-        url: item.url ?? null,
-        previewUrl: item.preview_url ?? null,
-        fileUrl: item.file_url ?? null,
-        name: item.name ?? null,
-        mimeType: item.mime_type ?? null
-      }));
-      return {
-        messageId: msg.messageId,
-        type: msg.type,
-        senderType: msg.senderType,
-        senderId: msg.senderId,
-        senderName: msg.senderName,
-        staffId: msg.staffId,
-        staffName: msg.staffName,
-        message: msg.message,
-        originalMessage: msg.originalMessage,
-        attachments,
-        hasPhone: msg.hasPhone,
-        seen: msg.seen,
-        isRemoved: msg.isRemoved,
-        isHidden: msg.isHidden,
-        sourceInsertedAt: msg.sourceInsertedAt.toISOString()
-      };
-    }),
-    pendingOutbound: outbound.map((item) => ({
-      clientMessageId: item.clientMessageId,
-      message: item.message,
-      status: item.status,
-      errorCode: item.errorCode,
-      errorMessage: item.errorMessage,
-      createdAt: item.createdAt.toISOString()
-    }))
-  };
-}
-async function sendConversationMessage(db4, userId, input2, adapter = new PancakePagesClient) {
-  await assertShopWriter(db4, userId, input2.shopId);
-  const [conversation, user] = await Promise.all([
-    db4.pancakeConversation.findUnique({
-      where: {
-        shopId_pageId_conversationId: {
-          shopId: input2.shopId,
-          pageId: input2.pageId,
-          conversationId: input2.conversationId
-        }
-      },
-      include: { page: true }
-    }),
-    db4.user.findUnique({
-      where: { id: userId },
-      select: { name: true }
-    })
-  ]);
-  if (!conversation) {
-    throw new PancakePagesApiError("CONFIGURATION_REQUIRED", "Không tìm thấy hội thoại trong workspace này.");
-  }
-  if (!conversation.page.encryptedAccessToken || conversation.page.tokenStatus !== "active") {
-    throw new PancakePagesApiError("PERMISSION_DENIED", conversation.page.tokenReason ?? "Page chưa có Page Access Token hợp lệ để gửi tin nhắn.");
-  }
-  if (!conversation.canInbox && conversation.type === "INBOX") {
-    throw new PancakePagesApiError("MESSAGING_WINDOW_CLOSED", "Đã quá thời hạn cho phép gửi tin nhắn Inbox theo chính sách nền tảng (can_inbox = false).");
-  }
-  const lockKey = `pancake-send:${input2.shopId}:${input2.pageId}:${input2.conversationId}:${input2.clientMessageId}`;
-  const uniqueKey = {
-    shopId_pageId_conversationId_clientMessageId: {
-      shopId: input2.shopId,
-      pageId: input2.pageId,
-      conversationId: input2.conversationId,
-      clientMessageId: input2.clientMessageId
-    }
-  };
-  const outboundState = await db4.$transaction(async (tx) => {
-    await lockIdempotencyKey(tx, lockKey);
-    const existing = await tx.pancakeOutboundMessage.findUnique({
-      where: uniqueKey
-    });
-    if (existing) {
-      if (existing.status === "sent") {
-        return { alreadySent: true, record: existing };
-      }
-      if (existing.status === "sending") {
-        return { inFlight: true, record: existing };
-      }
-      const retried = await tx.pancakeOutboundMessage.update({
-        where: uniqueKey,
-        data: {
-          status: "sending",
-          message: input2.message,
-          errorCode: null,
-          errorMessage: null,
-          attempts: { increment: 1 }
-        }
-      });
-      return { alreadySent: false, inFlight: false, record: retried };
-    }
-    const created = await tx.pancakeOutboundMessage.create({
-      data: {
-        shopId: input2.shopId,
-        pageId: input2.pageId,
-        conversationId: input2.conversationId,
-        clientMessageId: input2.clientMessageId,
-        action: "reply_inbox",
-        message: input2.message,
-        status: "sending",
-        sentByUserId: userId
-      }
-    });
-    return { alreadySent: false, inFlight: false, record: created };
-  });
-  if (outboundState.alreadySent) {
-    return {
-      status: "sent",
-      deduplicated: true,
-      clientMessageId: outboundState.record.clientMessageId,
-      remoteMessageId: outboundState.record.remoteMessageId,
-      errorCode: null,
-      errorMessage: null
-    };
-  }
-  if (outboundState.inFlight) {
-    return {
-      status: "sending",
-      deduplicated: true,
-      clientMessageId: outboundState.record.clientMessageId,
-      remoteMessageId: null,
-      errorCode: null,
-      errorMessage: null
-    };
-  }
-  const pageAccessToken = decryptToken(conversation.page.encryptedAccessToken);
-  try {
-    const sendResult = await adapter.sendMessage(input2.pageId, input2.conversationId, pageAccessToken, {
-      action: "reply_inbox",
-      message: input2.message
-    });
-    if (!sendResult.success) {
-      const errorCode = sendResult.errorCode ?? "SEND_FAILED";
-      const errorMessage = sendResult.errorMessage ?? "Nền tảng từ chối gửi tin nhắn.";
-      await db4.pancakeOutboundMessage.update({
-        where: uniqueKey,
-        data: {
-          status: "failed",
-          errorCode,
-          errorMessage
-        }
-      });
-      throw new PancakePagesApiError("SEND_FAILED", errorMessage, 0, errorCode);
-    }
-    const now2 = new Date;
-    const remoteMessageId = sendResult.remoteMessageId ?? `local_${input2.clientMessageId}`;
-    const senderName = user?.name ?? conversation.page.name;
-    await db4.$transaction([
-      db4.pancakeOutboundMessage.update({
-        where: uniqueKey,
-        data: {
-          status: "sent",
-          remoteMessageId,
-          errorCode: null,
-          errorMessage: null
-        }
-      }),
-      db4.pancakeMessage.upsert({
-        where: {
-          shopId_pageId_conversationId_messageId: {
-            shopId: input2.shopId,
-            pageId: input2.pageId,
-            conversationId: input2.conversationId,
-            messageId: remoteMessageId
-          }
-        },
-        create: {
-          shopId: input2.shopId,
-          pageId: input2.pageId,
-          conversationId: input2.conversationId,
-          messageId: remoteMessageId,
-          type: conversation.type,
-          senderType: "staff",
-          senderId: conversation.pageId,
-          senderName,
-          staffId: userId,
-          staffName: senderName,
-          message: input2.message,
-          originalMessage: input2.message,
-          attachments: [],
-          seen: true,
-          sourceInsertedAt: now2,
-          fetchedAt: now2,
-          raw: {
-            id: remoteMessageId,
-            message: input2.message,
-            inserted_at: now2.toISOString(),
-            from: {
-              id: conversation.pageId,
-              name: conversation.page.name,
-              admin_id: userId,
-              admin_name: senderName
-            }
-          }
-        },
-        update: {
-          message: input2.message,
-          originalMessage: input2.message,
-          fetchedAt: now2
-        }
-      }),
-      db4.pancakeConversation.update({
-        where: {
-          shopId_pageId_conversationId: {
-            shopId: input2.shopId,
-            pageId: input2.pageId,
-            conversationId: input2.conversationId
-          }
-        },
-        data: {
-          snippet: input2.message,
-          seen: true,
-          isReplied: true,
-          sourceUpdatedAt: now2,
-          messageCount: { increment: 1 }
-        }
-      })
-    ]);
-    return {
-      status: "sent",
-      deduplicated: false,
-      clientMessageId: input2.clientMessageId,
-      remoteMessageId,
-      errorCode: null,
-      errorMessage: null
-    };
-  } catch (error53) {
-    if (!(error53 instanceof PancakePagesApiError && error53.code === "SEND_FAILED")) {
-      const code = error53 instanceof PancakePagesApiError ? error53.code : "SEND_FAILED";
-      const message2 = error53 instanceof Error ? redactSecrets(error53.message) : "Gửi tin nhắn thất bại.";
-      await db4.pancakeOutboundMessage.update({
-        where: uniqueKey,
-        data: {
-          status: "failed",
-          errorCode: code,
-          errorMessage: message2
-        }
-      });
-      if (code === "TOKEN_EXPIRED_OR_REVOKED" || code === "PERMISSION_DENIED") {
-        await db4.pancakePage.update({
-          where: {
-            shopId_pageId: { shopId: input2.shopId, pageId: input2.pageId }
-          },
-          data: {
-            tokenStatus: code === "PERMISSION_DENIED" ? "permission_denied" : "expired",
-            tokenReason: message2,
-            lastError: message2,
-            lastErrorCode: code
-          }
-        });
-      }
-    }
-    throw error53;
-  }
-}
-async function markConversationSeen(db4, userId, input2, adapter = new PancakePagesClient) {
-  await assertShopWriter(db4, userId, input2.shopId);
-  const conversation = await db4.pancakeConversation.findUnique({
-    where: {
-      shopId_pageId_conversationId: {
-        shopId: input2.shopId,
-        pageId: input2.pageId,
-        conversationId: input2.conversationId
-      }
-    },
-    include: { page: true }
-  });
-  if (!conversation) {
-    throw new PancakePagesApiError("CONFIGURATION_REQUIRED", "Không tìm thấy hội thoại.");
-  }
-  if (conversation.page.encryptedAccessToken && conversation.page.tokenStatus === "active") {
-    try {
-      const pat = decryptToken(conversation.page.encryptedAccessToken);
-      await adapter.markSeen(input2.pageId, input2.conversationId, pat, input2.seen);
-    } catch (error53) {}
-  }
-  await db4.pancakeConversation.update({
-    where: {
-      shopId_pageId_conversationId: {
-        shopId: input2.shopId,
-        pageId: input2.pageId,
-        conversationId: input2.conversationId
-      }
-    },
-    data: { seen: input2.seen }
-  });
-  return { seen: input2.seen };
-}
-
-// ../../packages/pancake/src/exports.ts
-init_zod();
-
 // ../../packages/pancake/src/queries.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
-init_zod();
 function splitList(raw4) {
   return [
     ...new Set((raw4 ?? "").split(",").map((value) => value.trim()).filter((value) => value && value !== PANCAKE.anyValue))
@@ -325912,7 +323531,569 @@ async function leadReport(db4, userId, input2) {
   };
 }
 
+// ../../packages/pancake/src/conversations.ts
+var connectUserTokenInput = exports_external.object({
+  shopId: exports_external.string().min(1),
+  userAccessToken: exports_external.string().trim().min(8).max(4000).optional()
+});
+var pagesListInput = exports_external.object({
+  shopId: exports_external.string().min(1),
+  q: exports_external.string().max(120).default(""),
+  filter: exports_external.enum(["all", "matching_shop", "has_token", "missing_token"]).default("all")
+});
+var setPageManualTokenInput = exports_external.object({
+  shopId: exports_external.string().min(1),
+  pageId: exports_external.string().min(1),
+  pageAccessToken: exports_external.string().trim().min(8).max(4000),
+  confirmReplace: exports_external.literal(true)
+});
+var confirmGeneratePageTokenInput = exports_external.object({
+  shopId: exports_external.string().min(1),
+  pageId: exports_external.string().min(1),
+  confirmReplace: exports_external.literal(true)
+});
+var customerConversationInput = exports_external.object({
+  shopId: exports_external.string().min(1),
+  customerId: exports_external.string().min(1),
+  loaded: exports_external.number().int().min(0).max(5000).default(0)
+});
+var sendCustomerMessageInput = exports_external.object({
+  shopId: exports_external.string().min(1),
+  customerId: exports_external.string().min(1),
+  message: exports_external.string().trim().min(1).max(4000)
+});
+var customerSourceSchema = exports_external.object({
+  fb_id: exports_external.string().nullish(),
+  conversation_link: exports_external.string().nullish()
+}).passthrough();
+var conversationIdPattern = /^(\d+)_(\d+)$/;
+var TOKEN_FAILURES = new Map([
+  ["TOKEN_EXPIRED_OR_REVOKED", "expired"],
+  ["PERMISSION_DENIED", "permission_denied"]
+]);
+function describeMissingTokenReason(page) {
+  if (page.roleInPage === "NO_PERMISSION") {
+    return {
+      tokenStatus: "permission_denied",
+      tokenReason: "Tài khoản không có quyền truy cập Page này trên Pancake (nopermission)."
+    };
+  }
+  if (page.roleInPage && page.roleInPage !== "ADMINISTER") {
+    return {
+      tokenStatus: "permission_denied",
+      tokenReason: `Tài khoản chỉ có quyền ${page.roleInPage} trên Page này (cần quyền ADMINISTER để lấy/tạo Page Access Token hoặc nhập token hiện có).`
+    };
+  }
+  return {
+    tokenStatus: "missing",
+    tokenReason: "Page chưa có Page Access Token. Vui lòng nhập token hiện có hoặc xác nhận tạo mới."
+  };
+}
+async function resolveUserAccessToken(db4, shopId2, explicitToken) {
+  if (explicitToken?.trim()) {
+    return explicitToken.trim();
+  }
+  const stored = await db4.pancakeAccountConnection.findUnique({
+    where: { shopId: shopId2 }
+  });
+  if (stored?.encryptedUserToken) {
+    return decryptToken(stored.encryptedUserToken);
+  }
+  const envToken = process.env.PANCAKE_USER_ACCESS_TOKEN?.trim() || process.env.PANCAKE_TOKEN?.trim();
+  if (envToken) {
+    return envToken;
+  }
+  throw new PancakePagesApiError("CONFIGURATION_REQUIRED", "Chưa cấu hình Pancake User Access Token cho cửa hàng này.");
+}
+async function connectAndDiscoverPages(db4, userId, input2, adapter = new PancakePagesClient) {
+  await assertShopManager(db4, userId, input2.shopId);
+  const userToken = await resolveUserAccessToken(db4, input2.shopId, input2.userAccessToken);
+  let discovered;
+  try {
+    discovered = await adapter.listPages(userToken);
+  } catch (error53) {
+    const message2 = error53 instanceof Error ? redactSecrets(error53.message) : "Không thể kết nối Pancake User Access Token.";
+    if (input2.userAccessToken) {
+      await db4.pancakeAccountConnection.upsert({
+        where: { shopId: input2.shopId },
+        create: {
+          shopId: input2.shopId,
+          encryptedUserToken: encryptToken(userToken),
+          tokenMasked: maskToken(userToken),
+          status: "invalid",
+          lastError: message2,
+          updatedById: userId
+        },
+        update: {
+          status: "invalid",
+          lastError: message2,
+          updatedById: userId
+        }
+      });
+    } else {
+      await db4.pancakeAccountConnection.updateMany({
+        where: { shopId: input2.shopId },
+        data: { status: "expired", lastError: message2 }
+      });
+    }
+    throw error53;
+  }
+  const existingPages = await db4.pancakePage.findMany({
+    where: { shopId: input2.shopId },
+    select: {
+      pageId: true,
+      encryptedAccessToken: true,
+      tokenMasked: true,
+      tokenStatus: true,
+      tokenSource: true,
+      tokenReason: true
+    }
+  });
+  const existingById = new Map(existingPages.map((p2) => [p2.pageId, p2]));
+  const connection = {
+    encryptedUserToken: encryptToken(userToken),
+    tokenMasked: maskToken(userToken),
+    status: "active",
+    lastVerifiedAt: new Date,
+    lastError: null,
+    discoveredCount: discovered.length,
+    updatedById: userId
+  };
+  await db4.pancakeAccountConnection.upsert({
+    where: { shopId: input2.shopId },
+    create: { shopId: input2.shopId, ...connection },
+    update: connection
+  });
+  let existingTokensSaved = 0;
+  const created = [];
+  const updated = [];
+  for (const page of discovered) {
+    const prev = existingById.get(page.pageId);
+    let token;
+    if (page.existingPageAccessToken) {
+      existingTokensSaved++;
+      token = {
+        encryptedAccessToken: encryptToken(page.existingPageAccessToken),
+        tokenMasked: maskToken(page.existingPageAccessToken),
+        tokenStatus: "active",
+        tokenSource: "existing",
+        tokenReason: null
+      };
+    } else if (prev?.encryptedAccessToken) {
+      token = {
+        encryptedAccessToken: prev.encryptedAccessToken,
+        tokenMasked: prev.tokenMasked,
+        tokenStatus: prev.tokenStatus,
+        tokenSource: prev.tokenSource,
+        tokenReason: prev.tokenReason
+      };
+    } else {
+      token = {
+        encryptedAccessToken: null,
+        tokenMasked: null,
+        tokenSource: null,
+        ...describeMissingTokenReason(page)
+      };
+    }
+    (prev ? updated : created).push({
+      shopId: input2.shopId,
+      pageId: page.pageId,
+      name: page.name,
+      platform: page.platform,
+      username: page.username,
+      avatarUrl: page.avatarUrl,
+      sourceShopId: page.sourceShopId,
+      roleInPage: page.roleInPage,
+      isActivated: page.isActivated,
+      hasSubscription: page.hasSubscription,
+      needFixWebhook: page.needFixWebhook,
+      ...token,
+      raw: page.raw
+    });
+  }
+  for (let i = 0;i < created.length; i += PANCAKE.pageWriteChunk) {
+    await db4.pancakePage.createMany({
+      data: created.slice(i, i + PANCAKE.pageWriteChunk),
+      skipDuplicates: true
+    });
+  }
+  for (let i = 0;i < updated.length; i += PANCAKE.pageUpdateConcurrency) {
+    await Promise.all(updated.slice(i, i + PANCAKE.pageUpdateConcurrency).map(({ shopId: shopId2, pageId, ...data }) => db4.pancakePage.update({
+      where: { shopId_pageId: { shopId: shopId2, pageId } },
+      data
+    })));
+  }
+  await writeAudit(db4, {
+    shopId: input2.shopId,
+    userId,
+    area: "settings",
+    action: "pancake_pages_discover",
+    summary: `Tải danh sách ${discovered.length} Page từ Pancake (${existingTokensSaved} Page đã có sẵn token).`
+  });
+  return {
+    discoveredCount: discovered.length,
+    existingTokensSaved,
+    tokenMasked: maskToken(userToken)
+  };
+}
+function decryptable(payload2) {
+  if (!payload2)
+    return false;
+  try {
+    decryptToken(payload2);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function listWorkspacePages(db4, userId, input2) {
+  const grants = await assertShopReader(db4, userId, input2.shopId);
+  const q2 = input2.q.trim().toLowerCase();
+  const [connection, pages] = await Promise.all([
+    db4.pancakeAccountConnection.findUnique({
+      where: { shopId: input2.shopId }
+    }),
+    db4.pancakePage.findMany({
+      where: { shopId: input2.shopId },
+      select: {
+        pageId: true,
+        name: true,
+        platform: true,
+        username: true,
+        avatarUrl: true,
+        sourceShopId: true,
+        roleInPage: true,
+        tokenMasked: true,
+        tokenStatus: true,
+        tokenReason: true,
+        encryptedAccessToken: true
+      },
+      orderBy: { name: "asc" }
+    })
+  ]);
+  const repaired = pages.filter((page) => page.tokenStatus === "invalid" && decryptable(page.encryptedAccessToken)).map((page) => page.pageId);
+  if (repaired.length > 0) {
+    await db4.pancakePage.updateMany({
+      where: { shopId: input2.shopId, pageId: { in: repaired } },
+      data: {
+        tokenStatus: "active",
+        tokenReason: null,
+        lastError: null,
+        lastErrorCode: null
+      }
+    });
+  }
+  const mapped = pages.map(({ encryptedAccessToken: _, ...page }) => {
+    const fixed = repaired.includes(page.pageId);
+    return {
+      ...page,
+      matchesShop: page.sourceShopId === input2.shopId,
+      tokenStatus: fixed ? "active" : page.tokenStatus,
+      tokenReason: fixed ? null : page.tokenReason
+    };
+  });
+  const filtered = mapped.filter((row) => {
+    if (q2 && !row.name.toLowerCase().includes(q2) && !row.pageId.toLowerCase().includes(q2) && !(row.username ?? "").toLowerCase().includes(q2)) {
+      return false;
+    }
+    if (input2.filter === "matching_shop")
+      return row.matchesShop;
+    if (input2.filter === "has_token")
+      return row.tokenStatus === "active";
+    if (input2.filter === "missing_token")
+      return row.tokenStatus !== "active";
+    return true;
+  });
+  const envToken = process.env.PANCAKE_USER_ACCESS_TOKEN?.trim() || process.env.PANCAKE_TOKEN?.trim();
+  return {
+    canManage: canManage(grants, input2.shopId),
+    connection: connection ? {
+      connected: true,
+      tokenMasked: connection.tokenMasked,
+      status: connection.status,
+      lastVerifiedAt: connection.lastVerifiedAt?.toISOString() ?? null,
+      lastError: connection.lastError,
+      hasEnvToken: Boolean(envToken)
+    } : {
+      connected: false,
+      tokenMasked: envToken ? maskToken(envToken) : null,
+      status: envToken ? "env_ready" : "disconnected",
+      lastVerifiedAt: null,
+      lastError: null,
+      hasEnvToken: Boolean(envToken)
+    },
+    summary: {
+      total: mapped.length,
+      matchingShop: mapped.filter((p2) => p2.matchesShop).length,
+      activeToken: mapped.filter((p2) => p2.tokenStatus === "active").length,
+      missingToken: mapped.filter((p2) => p2.tokenStatus !== "active").length
+    },
+    pages: filtered
+  };
+}
+async function storePageToken(db4, userId, input2, token, source) {
+  const tokenMasked = maskToken(token);
+  await db4.$transaction(async (tx) => {
+    await tx.pancakePage.update({
+      where: { shopId_pageId: { shopId: input2.shopId, pageId: input2.pageId } },
+      data: {
+        encryptedAccessToken: encryptToken(token),
+        tokenMasked,
+        tokenStatus: "active",
+        tokenSource: source,
+        tokenReason: null,
+        lastError: null,
+        lastErrorCode: null
+      }
+    });
+    await writeAudit(tx, {
+      shopId: input2.shopId,
+      userId,
+      area: "settings",
+      action: source === "manual" ? "pancake_page_token_manual" : "pancake_page_token_generate",
+      summary: `${source === "manual" ? "Cập nhật thủ công" : "Tạo mới"} Page Access Token cho Page ${input2.pageId} (${tokenMasked}).`
+    });
+  });
+  clearConversationCache();
+  return { pageId: input2.pageId, tokenMasked, tokenStatus: "active" };
+}
+async function setPageManualToken(db4, userId, input2) {
+  await assertShopManager(db4, userId, input2.shopId);
+  return storePageToken(db4, userId, input2, input2.pageAccessToken, "manual");
+}
+async function confirmGeneratePageToken(db4, userId, input2, adapter = new PancakePagesClient) {
+  await assertShopManager(db4, userId, input2.shopId);
+  const key = {
+    shopId_pageId: { shopId: input2.shopId, pageId: input2.pageId }
+  };
+  const page = await db4.pancakePage.findUnique({ where: key });
+  if (!page) {
+    throw new PancakePagesApiError("CONFIGURATION_REQUIRED", "Không tìm thấy Page trong workspace này.");
+  }
+  if (page.roleInPage && page.roleInPage !== "ADMINISTER") {
+    const reason = `Không thể tạo Page Access Token vì tài khoản chỉ có quyền ${page.roleInPage} (yêu cầu quyền ADMINISTER).`;
+    await db4.pancakePage.update({
+      where: key,
+      data: {
+        tokenStatus: "permission_denied",
+        tokenReason: reason,
+        lastError: reason,
+        lastErrorCode: "PERMISSION_DENIED"
+      }
+    });
+    throw new PancakePagesApiError("PERMISSION_DENIED", reason);
+  }
+  const userToken = await resolveUserAccessToken(db4, input2.shopId);
+  let pageToken;
+  try {
+    pageToken = await adapter.generatePageAccessToken(userToken, input2.pageId);
+  } catch (error53) {
+    const code = error53 instanceof PancakePagesApiError ? error53.code : "PERMISSION_DENIED";
+    const reason = error53 instanceof Error ? redactSecrets(error53.message) : "Không thể tạo Page Access Token.";
+    await db4.pancakePage.update({
+      where: key,
+      data: {
+        tokenStatus: code === "TOKEN_EXPIRED_OR_REVOKED" ? "expired" : "permission_denied",
+        tokenReason: reason,
+        lastError: reason,
+        lastErrorCode: code
+      }
+    });
+    throw error53;
+  }
+  return storePageToken(db4, userId, input2, pageToken, "generated");
+}
+var conversationCache = new Map;
+function clearConversationCache(conversationId) {
+  if (!conversationId) {
+    conversationCache.clear();
+    return;
+  }
+  for (const key of conversationCache.keys()) {
+    if (key.startsWith(`${conversationId}:`))
+      conversationCache.delete(key);
+  }
+}
+async function cachedMessages(adapter, pageId, conversationId, token, loaded2) {
+  const key = `${conversationId}:${loaded2}`;
+  const now2 = Date.now();
+  const hit = conversationCache.get(key);
+  if (hit && hit.expiresAt > now2)
+    return hit.value;
+  const value = await adapter.listMessages(pageId, conversationId, token, loaded2 || undefined);
+  conversationCache.delete(key);
+  conversationCache.set(key, {
+    expiresAt: now2 + PANCAKE.conversationCacheMs,
+    value
+  });
+  for (const oldest of conversationCache.keys()) {
+    if (conversationCache.size <= PANCAKE.conversationCacheMax)
+      break;
+    conversationCache.delete(oldest);
+  }
+  return value;
+}
+async function conversationTarget(db4, userId, shopId2, customerId) {
+  const grants = await assertShopReader(db4, userId, shopId2);
+  const customer = await db4.pancakeCustomer.findFirst({
+    where: { AND: [customerScope(grants, shopId2), { customerId }] },
+    select: { raw: true }
+  });
+  const source = customerSourceSchema.safeParse(customer?.raw ?? {});
+  const link2 = source.success ? source.data.conversation_link ?? null : null;
+  const match = source.success ? conversationIdPattern.exec(source.data.fb_id ?? "") : null;
+  const pageId = match?.[1];
+  if (!match || !pageId)
+    return { state: "none", link: link2 };
+  const pages = await db4.pancakePage.findMany({
+    where: { pageId, encryptedAccessToken: { not: null } },
+    select: {
+      shopId: true,
+      pageId: true,
+      name: true,
+      tokenStatus: true,
+      tokenReason: true,
+      encryptedAccessToken: true
+    }
+  });
+  const usable = pages.filter((p2) => p2.tokenStatus !== "expired" && p2.tokenStatus !== "permission_denied");
+  const page = usable.find((p2) => p2.shopId === shopId2) ?? usable[0] ?? pages[0];
+  if (!page?.encryptedAccessToken) {
+    return {
+      state: "unavailable",
+      link: link2,
+      pageName: null,
+      reason: `Page ${pageId} chưa có Page Access Token. Thêm token trong Cài đặt → Kết nối.`
+    };
+  }
+  if (!usable.includes(page)) {
+    return {
+      state: "unavailable",
+      link: link2,
+      pageName: page.name,
+      reason: page.tokenReason ?? "Page Access Token hết hạn hoặc thiếu quyền."
+    };
+  }
+  let token;
+  try {
+    token = decryptToken(page.encryptedAccessToken);
+  } catch {
+    return {
+      state: "unavailable",
+      link: link2,
+      pageName: page.name,
+      reason: "Máy chủ không giải mã được Page Access Token. Khóa mã hóa trên máy chủ khác khóa lúc lưu token."
+    };
+  }
+  if (page.tokenStatus === "invalid") {
+    await db4.pancakePage.update({
+      where: { shopId_pageId: { shopId: page.shopId, pageId } },
+      data: { tokenStatus: "active", tokenReason: null }
+    });
+  }
+  return {
+    state: "ready",
+    link: link2,
+    pageId,
+    pageName: page.name,
+    conversationId: match[0],
+    token,
+    page: { shopId: page.shopId, pageId }
+  };
+}
+async function recordTokenFailure(db4, page, error53) {
+  if (!(error53 instanceof PancakePagesApiError))
+    return;
+  const tokenStatus = TOKEN_FAILURES.get(error53.code);
+  if (!tokenStatus)
+    return;
+  await db4.pancakePage.update({
+    where: { shopId_pageId: page },
+    data: {
+      tokenStatus,
+      tokenReason: error53.message,
+      lastError: error53.message,
+      lastErrorCode: error53.code
+    }
+  });
+}
+function toMessage(pageId, msg) {
+  const from = msg.from;
+  const staffName = from?.admin_name ?? null;
+  const fromPage = Boolean(staffName || from?.admin_id || from?.uid || from?.id === pageId);
+  return {
+    id: msg.id,
+    fromPage,
+    senderName: staffName ?? from?.name ?? (fromPage ? "Page" : "Khách hàng"),
+    text: messageText(msg.message ?? msg.original_message ?? ""),
+    attachments: (msg.attachments ?? []).flatMap((item) => {
+      const url2 = item.image?.url ?? item.url ?? item.video_data?.url ?? item.target?.url ?? item.link ?? null;
+      if (!url2)
+        return [];
+      return [
+        {
+          url: url2,
+          image: Boolean(item.image?.url) || item.type === "photo" || item.type === "sticker" || (item.mime_type ?? "").startsWith("image/"),
+          name: item.title ?? item.type ?? null
+        }
+      ];
+    }),
+    sentAt: msg.inserted_at ? sourceDate(msg.inserted_at).toISOString() : null
+  };
+}
+async function customerConversation(db4, userId, input2, adapter = new PancakePagesClient) {
+  const target = await conversationTarget(db4, userId, input2.shopId, input2.customerId);
+  if (target.state !== "ready")
+    return target;
+  let result;
+  try {
+    result = await cachedMessages(adapter, target.pageId, target.conversationId, target.token, input2.loaded);
+  } catch (error53) {
+    await recordTokenFailure(db4, target.page, error53);
+    return {
+      state: "unavailable",
+      link: target.link,
+      pageName: target.pageName,
+      reason: error53 instanceof Error ? redactSecrets(error53.message) : "Không tải được hội thoại từ Pancake."
+    };
+  }
+  const unique2 = new Map(result.messages.filter((msg) => !msg.is_hidden).map((msg) => [msg.id, toMessage(target.pageId, msg)]));
+  const messages = [...unique2.values()].filter((msg) => msg.text || msg.attachments.length > 0).sort((a3, b2) => (a3.sentAt ?? "").localeCompare(b2.sentAt ?? ""));
+  return {
+    state: "ready",
+    link: target.link,
+    pageName: target.pageName,
+    canInbox: result.canInbox,
+    hasOlder: result.messages.length >= PANCAKE.messageBatchSize,
+    fetched: result.messages.length,
+    messages
+  };
+}
+async function sendCustomerMessage(db4, userId, input2, adapter = new PancakePagesClient) {
+  await assertShopWriter(db4, userId, input2.shopId);
+  const target = await conversationTarget(db4, userId, input2.shopId, input2.customerId);
+  if (target.state === "none") {
+    throw new PancakePagesApiError("CONFIGURATION_REQUIRED", "Khách hàng chưa có hội thoại Pancake.");
+  }
+  if (target.state === "unavailable") {
+    throw new PancakePagesApiError("PERMISSION_DENIED", target.reason);
+  }
+  let result;
+  try {
+    result = await adapter.sendMessage(target.pageId, target.conversationId, target.token, { action: "reply_inbox", message: input2.message });
+  } catch (error53) {
+    await recordTokenFailure(db4, target.page, error53);
+    throw error53;
+  }
+  if (!result.success) {
+    throw new PancakePagesApiError("SEND_FAILED", result.errorMessage ?? "Nền tảng từ chối gửi tin nhắn.", 0, result.errorCode ?? undefined);
+  }
+  clearConversationCache(target.conversationId);
+  return { remoteMessageId: result.remoteMessageId };
+}
+
 // ../../packages/pancake/src/exports.ts
+init_zod();
 var listExport = exports_external.object({
   kind: exports_external.enum(["contacts", "orders", "products", "business"]),
   shopId: exports_external.string().min(1),
@@ -327548,32 +325729,17 @@ class PancakeService {
   pages(userId, input2) {
     return this.authorize(() => listWorkspacePages(this.db, userId, input2));
   }
-  bulkAssignPages(userId, input2) {
-    return this.authorize(() => bulkAssignPages(this.db, userId, input2));
-  }
-  configurePageSync(userId, input2) {
-    return this.authorize(() => configurePageSync(this.db, userId, input2));
-  }
   setPageManualToken(userId, input2) {
     return this.authorize(() => setPageManualToken(this.db, userId, input2));
   }
   confirmGeneratePageToken(userId, input2) {
     return this.authorize(() => confirmGeneratePageToken(this.db, userId, input2));
   }
-  syncPagesNow(userId, input2) {
-    return this.authorize(() => syncPagesNow(this.db, userId, input2));
+  customerConversation(userId, input2) {
+    return this.authorize(() => customerConversation(this.db, userId, input2));
   }
-  conversations(userId, input2) {
-    return this.authorize(() => listConversations(this.db, userId, input2));
-  }
-  conversationMessages(userId, input2) {
-    return this.authorize(() => conversationMessages(this.db, userId, input2));
-  }
-  sendConversationMessage(userId, input2) {
-    return this.authorize(() => sendConversationMessage(this.db, userId, input2));
-  }
-  markConversationSeen(userId, input2) {
-    return this.authorize(() => markConversationSeen(this.db, userId, input2));
+  sendCustomerMessage(userId, input2) {
+    return this.authorize(() => sendCustomerMessage(this.db, userId, input2));
   }
   recordEvent(userId, entity, trigger, row, assignedNow) {
     return this.effects(userId, {
@@ -327775,17 +325941,11 @@ class PancakeRouter {
   taskReport(ctx, input2) {
     return this.pancake.taskReport(ctx.user.id, input2);
   }
-  conversations(ctx, input2) {
-    return this.pancake.conversations(ctx.user.id, input2);
+  customerConversation(ctx, input2) {
+    return this.pancake.customerConversation(ctx.user.id, input2);
   }
-  conversationMessages(ctx, input2) {
-    return this.pancake.conversationMessages(ctx.user.id, input2);
-  }
-  sendConversationMessage(ctx, input2) {
-    return this.pancake.sendConversationMessage(ctx.user.id, input2);
-  }
-  markConversationSeen(ctx, input2) {
-    return this.pancake.markConversationSeen(ctx.user.id, input2);
+  sendCustomerMessage(ctx, input2) {
+    return this.pancake.sendCustomerMessage(ctx.user.id, input2);
   }
 }
 __legacyDecorateClassTS([
@@ -328238,7 +326398,7 @@ __legacyDecorateClassTS([
   __legacyMetadataTS("design:returntype", undefined)
 ], PancakeRouter.prototype, "taskReport", null);
 __legacyDecorateClassTS([
-  import_nestjs_trpc15.Query({ input: pancakeConversationListInput }),
+  import_nestjs_trpc15.Query({ input: customerConversationInput }),
   __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
   __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
   __legacyMetadataTS("design:type", Function),
@@ -328247,9 +326407,9 @@ __legacyDecorateClassTS([
     typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
   ]),
   __legacyMetadataTS("design:returntype", undefined)
-], PancakeRouter.prototype, "conversations", null);
+], PancakeRouter.prototype, "customerConversation", null);
 __legacyDecorateClassTS([
-  import_nestjs_trpc15.Query({ input: conversationMessagesInput }),
+  import_nestjs_trpc15.Mutation({ input: sendCustomerMessageInput }),
   __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
   __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
   __legacyMetadataTS("design:type", Function),
@@ -328258,29 +326418,7 @@ __legacyDecorateClassTS([
     typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
   ]),
   __legacyMetadataTS("design:returntype", undefined)
-], PancakeRouter.prototype, "conversationMessages", null);
-__legacyDecorateClassTS([
-  import_nestjs_trpc15.Mutation({ input: sendConversationMessageInput }),
-  __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
-  __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
-  __legacyMetadataTS("design:type", Function),
-  __legacyMetadataTS("design:paramtypes", [
-    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
-    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
-  ]),
-  __legacyMetadataTS("design:returntype", undefined)
-], PancakeRouter.prototype, "sendConversationMessage", null);
-__legacyDecorateClassTS([
-  import_nestjs_trpc15.Mutation({ input: markConversationSeenInput }),
-  __legacyDecorateParamTS(0, import_nestjs_trpc15.Ctx()),
-  __legacyDecorateParamTS(1, import_nestjs_trpc15.Input()),
-  __legacyMetadataTS("design:type", Function),
-  __legacyMetadataTS("design:paramtypes", [
-    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
-    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
-  ]),
-  __legacyMetadataTS("design:returntype", undefined)
-], PancakeRouter.prototype, "markConversationSeen", null);
+], PancakeRouter.prototype, "sendCustomerMessage", null);
 PancakeRouter = __legacyDecorateClassTS([
   import_nestjs_trpc15.Router({ alias: "pancake" }),
   import_nestjs_trpc15.UseMiddlewares(AuthMiddleware),
@@ -328520,20 +326658,11 @@ class PancakeSettingsRouter {
   pages(ctx, input2) {
     return this.pancake.pages(ctx.user.id, input2);
   }
-  bulkAssignPages(ctx, input2) {
-    return this.pancake.bulkAssignPages(ctx.user.id, input2);
-  }
-  configurePageSync(ctx, input2) {
-    return this.pancake.configurePageSync(ctx.user.id, input2);
-  }
   setPageManualToken(ctx, input2) {
     return this.pancake.setPageManualToken(ctx.user.id, input2);
   }
   confirmGeneratePageToken(ctx, input2) {
     return this.pancake.confirmGeneratePageToken(ctx.user.id, input2);
-  }
-  syncPagesNow(ctx, input2) {
-    return this.pancake.syncPagesNow(ctx.user.id, input2);
   }
 }
 __legacyDecorateClassTS([
@@ -328812,28 +326941,6 @@ __legacyDecorateClassTS([
   __legacyMetadataTS("design:returntype", undefined)
 ], PancakeSettingsRouter.prototype, "pages", null);
 __legacyDecorateClassTS([
-  import_nestjs_trpc17.Mutation({ input: bulkAssignPagesInput }),
-  __legacyDecorateParamTS(0, import_nestjs_trpc17.Ctx()),
-  __legacyDecorateParamTS(1, import_nestjs_trpc17.Input()),
-  __legacyMetadataTS("design:type", Function),
-  __legacyMetadataTS("design:paramtypes", [
-    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
-    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
-  ]),
-  __legacyMetadataTS("design:returntype", undefined)
-], PancakeSettingsRouter.prototype, "bulkAssignPages", null);
-__legacyDecorateClassTS([
-  import_nestjs_trpc17.Mutation({ input: configurePageSyncInput }),
-  __legacyDecorateParamTS(0, import_nestjs_trpc17.Ctx()),
-  __legacyDecorateParamTS(1, import_nestjs_trpc17.Input()),
-  __legacyMetadataTS("design:type", Function),
-  __legacyMetadataTS("design:paramtypes", [
-    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
-    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
-  ]),
-  __legacyMetadataTS("design:returntype", undefined)
-], PancakeSettingsRouter.prototype, "configurePageSync", null);
-__legacyDecorateClassTS([
   import_nestjs_trpc17.Mutation({ input: setPageManualTokenInput }),
   __legacyDecorateParamTS(0, import_nestjs_trpc17.Ctx()),
   __legacyDecorateParamTS(1, import_nestjs_trpc17.Input()),
@@ -328855,17 +326962,6 @@ __legacyDecorateClassTS([
   ]),
   __legacyMetadataTS("design:returntype", undefined)
 ], PancakeSettingsRouter.prototype, "confirmGeneratePageToken", null);
-__legacyDecorateClassTS([
-  import_nestjs_trpc17.Mutation({ input: syncPagesNowInput }),
-  __legacyDecorateParamTS(0, import_nestjs_trpc17.Ctx()),
-  __legacyDecorateParamTS(1, import_nestjs_trpc17.Input()),
-  __legacyMetadataTS("design:type", Function),
-  __legacyMetadataTS("design:paramtypes", [
-    typeof AuthedTrpcContext === "undefined" ? Object : AuthedTrpcContext,
-    typeof exports_external === "undefined" || typeof exports_external.infer === "undefined" ? Object : exports_external.infer
-  ]),
-  __legacyMetadataTS("design:returntype", undefined)
-], PancakeSettingsRouter.prototype, "syncPagesNow", null);
 PancakeSettingsRouter = __legacyDecorateClassTS([
   import_nestjs_trpc17.Router({ alias: "pancakeSettings" }),
   import_nestjs_trpc17.UseMiddlewares(AuthMiddleware),
@@ -328877,6 +326973,18 @@ PancakeSettingsRouter = __legacyDecorateClassTS([
 
 // ../../packages/pancake/src/sync.ts
 init_zod();
+
+// ../../packages/pancake/src/client.ts
+class PancakeApiError extends Error {
+  code;
+  retryAfterMs;
+  constructor(code, retryAfterMs = 0) {
+    super(code);
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+    this.name = "PancakeApiError";
+  }
+}
 
 // ../../packages/pancake/src/store.ts
 init_zod();
@@ -328895,7 +327003,7 @@ var idOnly = exports_external.looseObject({
 
 // ../../packages/pancake/src/webhook.ts
 init_zod();
-import { createHash as createHash7, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHash as createHash6, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 var webhookPayload = exports_external.union([
   exports_external.object({
     id: sourceId,
@@ -328928,7 +327036,7 @@ async function queueWebhook(db4, shopId3, rawBody) {
   const event = webhookPayload.parse(JSON.parse(rawBody));
   if (event.shopId && event.shopId !== shopId3)
     throw new Error("SHOP_MISMATCH");
-  const dedupeKey = createHash7("sha256").update(rawBody).digest("hex");
+  const dedupeKey = createHash6("sha256").update(rawBody).digest("hex");
   await db4.$transaction([
     db4.pancakeWebhookJob.upsert({
       where: {
@@ -328951,37 +327059,10 @@ async function queueWebhook(db4, shopId3, rawBody) {
 // src/pancake/pancake-webhook.controller.ts
 var import_common104 = __toESM(require_common(), 1);
 init_zod();
-async function readWebhookRaw(request) {
-  let raw4;
-  if (request.body !== undefined) {
-    raw4 = JSON.stringify(request.body);
-  } else {
-    const chunks = [];
-    let size = 0;
-    for await (const chunk of request) {
-      const bytes2 = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      size += bytes2.length;
-      if (size > PANCAKE.webhookMaxBytes)
-        throw new import_common104.PayloadTooLargeException;
-      chunks.push(bytes2);
-    }
-    raw4 = Buffer.concat(chunks).toString("utf8");
-  }
-  if (Buffer.byteLength(raw4) > PANCAKE.webhookMaxBytes)
-    throw new import_common104.PayloadTooLargeException;
-  return raw4;
-}
-
 class PancakeWebhookController {
   db;
   constructor(db4) {
     this.db = db4;
-  }
-  async receivePageForShop(shopId3, headerToken, queryToken, request) {
-    return this.handlePageWebhook(request, headerToken ?? queryToken, shopId3);
-  }
-  async receivePage(headerToken, queryToken, shopId3, request) {
-    return this.handlePageWebhook(request, headerToken ?? queryToken, shopId3);
   }
   async receive(shopId3, token, request) {
     const shop = await this.db.pancakeShop.findUnique({
@@ -328994,7 +327075,23 @@ class PancakeWebhookController {
     } catch {
       throw new import_common104.ServiceUnavailableException("Live sync is locked.");
     }
-    const raw4 = await readWebhookRaw(request);
+    let raw4;
+    if (request.body !== undefined) {
+      raw4 = JSON.stringify(request.body);
+    } else {
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of request) {
+        const bytes2 = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        size += bytes2.length;
+        if (size > PANCAKE.webhookMaxBytes)
+          throw new import_common104.PayloadTooLargeException;
+        chunks.push(bytes2);
+      }
+      raw4 = Buffer.concat(chunks).toString("utf8");
+    }
+    if (Buffer.byteLength(raw4) > PANCAKE.webhookMaxBytes)
+      throw new import_common104.PayloadTooLargeException;
     try {
       await queueWebhook(this.db, shopId3, raw4);
     } catch (error53) {
@@ -329004,62 +327101,7 @@ class PancakeWebhookController {
     }
     return { accepted: true };
   }
-  async handlePageWebhook(request, providedToken, explicitShopId) {
-    const shop = explicitShopId ? await this.db.pancakeShop.findUnique({
-      where: { id: explicitShopId }
-    }) : null;
-    if (explicitShopId && !shop) {
-      throw new import_common104.ForbiddenException;
-    }
-    const expectedToken = (shop?.webhookTokenEnv ? process.env[shop.webhookTokenEnv] : undefined) ?? process.env.PANCAKE_PAGE_WEBHOOK_TOKEN;
-    if (expectedToken && !webhookTokenValid(expectedToken, providedToken)) {
-      throw new import_common104.ForbiddenException;
-    }
-    const raw4 = await readWebhookRaw(request);
-    try {
-      return await ingestPageWebhook(this.db, raw4, explicitShopId);
-    } catch (error53) {
-      if (error53 instanceof ZodError || error53 instanceof SyntaxError || error53 instanceof Error && (error53.message === "PAGE_ID_REQUIRED" || error53.message === "SHOP_NOT_FOUND")) {
-        throw new import_common104.BadRequestException("Invalid Pancake Page webhook payload.");
-      }
-      throw new import_common104.ServiceUnavailableException("Page webhook processing unavailable.");
-    }
-  }
 }
-__legacyDecorateClassTS([
-  import_common104.Post("page/:shopId"),
-  AllowAnonymous(),
-  import_common104.HttpCode(200),
-  __legacyDecorateParamTS(0, import_common104.Param("shopId")),
-  __legacyDecorateParamTS(1, import_common104.Headers("x-pancake-webhook-token")),
-  __legacyDecorateParamTS(2, import_common104.Query("token")),
-  __legacyDecorateParamTS(3, import_common104.Req()),
-  __legacyMetadataTS("design:type", Function),
-  __legacyMetadataTS("design:paramtypes", [
-    String,
-    String,
-    String,
-    typeof Request === "undefined" ? Object : Request
-  ]),
-  __legacyMetadataTS("design:returntype", Promise)
-], PancakeWebhookController.prototype, "receivePageForShop", null);
-__legacyDecorateClassTS([
-  import_common104.Post("page"),
-  AllowAnonymous(),
-  import_common104.HttpCode(200),
-  __legacyDecorateParamTS(0, import_common104.Headers("x-pancake-webhook-token")),
-  __legacyDecorateParamTS(1, import_common104.Query("token")),
-  __legacyDecorateParamTS(2, import_common104.Query("shopId")),
-  __legacyDecorateParamTS(3, import_common104.Req()),
-  __legacyMetadataTS("design:type", Function),
-  __legacyMetadataTS("design:paramtypes", [
-    String,
-    String,
-    String,
-    typeof Request === "undefined" ? Object : Request
-  ]),
-  __legacyMetadataTS("design:returntype", Promise)
-], PancakeWebhookController.prototype, "receivePage", null);
 __legacyDecorateClassTS([
   import_common104.Post(":shopId"),
   AllowAnonymous(),
@@ -330085,7 +328127,7 @@ class SlackConnectionService {
   }
   async status(userId) {
     const role2 = await this.access.assertMember(userId);
-    const [account, agents, matches2, memberCount, grant] = await Promise.all([
+    const [account, agents, matches, memberCount, grant] = await Promise.all([
       this.db.account.findFirst({
         where: { providerId: "slack", accessToken: { not: null } },
         orderBy: { updatedAt: "desc" },
@@ -330118,9 +328160,9 @@ class SlackConnectionService {
         select: { id: true, teamName: true }
       })
     ]);
-    const matched = matches2.filter((match) => match.slackUserId).length;
-    const reviewed = matches2.length;
-    const inventoryFresh = account && reviewed === memberCount && matches2.every((match) => match.updatedAt >= account.updatedAt);
+    const matched = matches.filter((match) => match.slackUserId).length;
+    const reviewed = matches.length;
+    const inventoryFresh = account && reviewed === memberCount && matches.every((match) => match.updatedAt >= account.updatedAt);
     if (account && !inventoryFresh) {
       await this.agent.slackPeopleRequested("Match workspace members to Slack accounts by exact email");
     }
@@ -331142,7 +329184,7 @@ FunnelService = __legacyDecorateClassTS([
 ], FunnelService);
 
 // ../../packages/db/src/tracking.ts
-import { createHash as createHash8, randomBytes as randomBytes5 } from "node:crypto";
+import { createHash as createHash7, randomBytes as randomBytes5 } from "node:crypto";
 var SITE_ID_PREFIX = "cmp_";
 var COOKIE_LIFETIMES = [
   { days: 395, label: "13 months" },
@@ -331219,7 +329261,7 @@ function configHash(config4) {
     cookieDays: config4.cookieDays,
     hosts: [...config4.hosts].map((entry) => `${entry.host}:${entry.scope}`).sort()
   });
-  return createHash8("sha256").update(canonical).digest("hex").slice(0, 12);
+  return createHash7("sha256").update(canonical).digest("hex").slice(0, 12);
 }
 function normalizeHost2(input2) {
   const trimmed = input2?.trim().toLowerCase();
@@ -331285,7 +329327,7 @@ function originAllowed(origin, config4) {
 }
 function dedupeKey(parts) {
   const minute2 = Math.floor(parts.at.getTime() / 60000);
-  return createHash8("sha256").update(`${parts.host}|${parts.path}|${parts.email ?? ""}|${minute2}`).digest("hex");
+  return createHash7("sha256").update(`${parts.host}|${parts.path}|${parts.email ?? ""}|${minute2}`).digest("hex");
 }
 async function readTrackingConfig(db4) {
   const [settings, domains] = await Promise.all([
@@ -332221,12 +330263,12 @@ function mediumFrom(value) {
 function match(host, table2) {
   const labels = host.split(".");
   for (const [needle, name3] of Object.entries(table2)) {
-    if (matches2(labels, needle))
+    if (matches(labels, needle))
       return name3;
   }
   return null;
 }
-function matches2(labels, needle) {
+function matches(labels, needle) {
   const open = needle.endsWith(".");
   const wanted = (open ? needle.slice(0, -1) : needle).split(".");
   for (let start = 0;start + wanted.length <= labels.length; start += 1) {
