@@ -8,12 +8,7 @@ import {
 export const SETTINGS_ID = "app";
 
 export const DEFAULT_AGENT_MODEL = {
-	id: "minimax/minimax-m3.1-flash",
-	contextWindowTokens: 1000000,
-} as const;
-
-export const EXPERT_AGENT_MODEL = {
-	id: "openai/gpt-4o",
+	id: "openai/gpt-4o-mini",
 	contextWindowTokens: 128_000,
 } as const;
 
@@ -44,10 +39,12 @@ export async function readAgentModel(db: Db): Promise<AgentModelSetting> {
 export async function writeAgentModel(
 	db: Db,
 	model: { id: string; contextWindowTokens: number } | null,
+	options: { auto?: boolean } = {},
 ): Promise<void> {
 	const fields = {
 		agentModelId: model?.id ?? null,
 		agentModelContextWindow: model?.contextWindowTokens ?? null,
+		agentModelAuto: model ? (options.auto ?? false) : false,
 	};
 
 	await db.appSetting.upsert({

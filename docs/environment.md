@@ -225,6 +225,29 @@ secret, then redeploy. A token that does not decrypt shows as unavailable in
 the Hội thoại tab. The stored token is kept. Legacy `invalid` tokens that
 decrypt are restored to `active` when the Page list loads.
 
+## Monthly model audit
+
+`apps/agent/agent/schedules/monthly-model-audit.ts` runs at 03:00 on day 1 of
+each month (`MODEL_AUDIT.cron`). It reads the public Vercel AI Gateway catalog
+(`https://ai-gateway.vercel.sh/v1/models`, no key needed) and may change the
+agent model. The same model serves the Pancake AI chat widget.
+
+- A model qualifies when it has the `tool-use` tag, has no `reasoning` or `free`
+  tag, is not a batch, preview or stealth model, has a context window of at least
+  128k tokens, and comes from a listed provider. Reasoning models are excluded
+  because their hidden output tokens are billed.
+- The audit estimates a month of spend from the input **and** output price:
+  `MODEL_AUDIT.monthlyTokens` (5M input, 2M output). It picks the cheapest.
+  `MODEL_AUDIT.minOutputUsdPerMillion` stops it from picking tiny models.
+- The audit keeps the current model when it costs at most 15% more than the
+  cheapest (`keepWithinRatio`). A model that left the catalog is replaced.
+- A model chosen by hand in Settings is never changed. Pick "default" in
+  Settings to give control back to the audit.
+- `MODEL_AUDIT.budgetUsd` (5) is only reported: the log line `model_audit` has
+  `overBudget: true` when even the cheapest model exceeds it. Set a hard spend
+  limit in the AI Gateway dashboard. The audit cannot enforce one.
+- Tune the token estimate in `model-audit-config.ts` when real usage differs.
+
 ## Not env vars
 
 - **Cache TTL** — `DEFAULT_TTL_MS` (60s) in `cache.module.ts`; `CACHE_TTL_MS` overrides.

@@ -1,4 +1,5 @@
 import { db } from "@crm/db";
+import { readAgentModel } from "@crm/db/settings";
 import { PancakeAccessError, shopGrants } from "@crm/pancake/access";
 import {
 	ASSISTANT_TOOLS,
@@ -75,6 +76,7 @@ function systemPrompt(shopNames: string[], today: string) {
 
 async function complete(
 	apiKey: string,
+	model: string,
 	messages: ChatMessage[],
 	withTools: boolean,
 ) {
@@ -85,7 +87,7 @@ async function complete(
 			"Content-Type": "application/json",
 		},
 		body: JSON.stringify({
-			model: ASSISTANT.model,
+			model,
 			messages,
 			tools: withTools ? ASSISTANT_TOOLS : undefined,
 			max_tokens: ASSISTANT.maxTokens,
@@ -163,11 +165,12 @@ export async function POST(req: Request) {
 		...body.data.messages.slice(-ASSISTANT.historyMessages),
 	];
 	const toolsCalled: string[] = [];
+	const model = await readAgentModel(db);
 
 	try {
 		for (let round = 0; round < ASSISTANT.maxRounds; round++) {
 			const last = round === ASSISTANT.maxRounds - 1;
-			const reply = await complete(apiKey, messages, !last);
+			const reply = await complete(apiKey, model.id, messages, !last);
 			const calls = last ? [] : (reply?.tool_calls ?? []);
 			if (calls.length === 0) {
 				return NextResponse.json({

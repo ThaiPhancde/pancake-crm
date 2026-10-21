@@ -1,0 +1,22 @@
+export const MODEL_AUDIT = {
+	url: "https://ai-gateway.vercel.sh/v1/models",
+	timeoutMs: 20_000,
+	budgetUsd: 5,
+	monthlyTokens: { input: 5_000_000, output: 2_000_000 },
+	minContextTokens: 128_000,
+	minOutputUsdPerMillion: 0.4,
+	keepWithinRatio: 1.15,
+	requiredTags: ["tool-use"],
+	excludedTags: ["reasoning", "free"],
+	excludedIdPattern: /batch|free|preview|experimental|stealth/i,
+	providers: [
+		"openai",
+		"anthropic",
+		"google",
+		"mistral",
+		"deepseek",
+		"alibaba",
+		"xai",
+	],
+	cron: "0 3 1 * *",
+} as const;

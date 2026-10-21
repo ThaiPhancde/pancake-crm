@@ -17,7 +17,6 @@ export const PANCAKE = {
 	conversationCacheMax: 300,
 	assistant: {
 		gatewayUrl: "https://ai-gateway.vercel.sh/v1/chat/completions",
-		model: "openai/gpt-4o-mini",
 		maxRounds: 3,
 		maxTokens: 900,
 		historyMessages: 12,

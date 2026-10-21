@@ -106,11 +106,6 @@ model PancakeShop {
   auditLogs         PancakeAuditLog[]
   accountConnection PancakeAccountConnection?
   pages             PancakePage[]
-  pageCursors       PancakePageSyncCursor[]
-  conversations     PancakeConversation[]
-  messages          PancakeMessage[]
-  outboundMessages  PancakeOutboundMessage[]
-  pageWebhooks      PancakePageWebhookEvent[]
 
   @@map("pancakeShop")
 }
@@ -143,7 +138,6 @@ model PancakeCustomer {
   raw                Json
   shop               PancakeShop           @relation(fields: [shopId], references: [id], onDelete: Restrict)
   orders             PancakeOrder[]
-  conversations      PancakeConversation[]
 
   @@id([shopId, customerId])
   @@index([shopId, name])
@@ -628,180 +622,21 @@ model PancakePage {
   isActivated          Boolean                   @default(true)
   hasSubscription      Boolean                   @default(true)
   needFixWebhook       Boolean                   @default(false)
-  assigned             Boolean                   @default(false)
-  syncEnabled          Boolean                   @default(false)
   encryptedAccessToken String?
   tokenMasked          String?
   tokenStatus          String                    @default("missing")
   tokenSource          String?
   tokenReason          String?
-  connectStatus        String                    @default("connected")
-  importFrom           DateTime?
-  importUntil          DateTime?
-  lastSyncAt           DateTime?
-  lastSuccessAt        DateTime?
-  lastWebhookAt        DateTime?
   lastError            String?
   lastErrorCode        String?
   raw                  Json                      @default("{}")
   createdAt            DateTime                  @default(now())
   updatedAt            DateTime                  @updatedAt
   shop                 PancakeShop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  cursor               PancakePageSyncCursor?
-  conversations        PancakeConversation[]
-  messages             PancakeMessage[]
-  outboundMessages     PancakeOutboundMessage[]
-  webhookEvents        PancakePageWebhookEvent[]
 
   @@id([shopId, pageId])
-  @@index([shopId, assigned, syncEnabled])
   @@index([pageId])
   @@map("pancakePage")
-}
-
-model PancakePageSyncCursor {
-  shopId                String
-  pageId                String
-  phase                 String      @default("idle")
-  lastConversationId    String?
-  pendingConversationId String?
-  pendingMessageCount   Int         @default(0)
-  importFrom            DateTime?
-  importUntil           DateTime?
-  windowStart           DateTime?
-  windowEnd             DateTime?
-  watermark             DateTime?
-  syncedConversations   Int         @default(0)
-  syncedMessages        Int         @default(0)
-  lastSuccessAt         DateTime?
-  lastError             String?
-  lastErrorCode         String?
-  updatedAt             DateTime    @updatedAt
-  shop                  PancakeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  page                  PancakePage @relation(fields: [shopId, pageId], references: [shopId, pageId], onDelete: Cascade)
-
-  @@id([shopId, pageId])
-  @@map("pancakePageSyncCursor")
-}
-
-model PancakeConversation {
-  shopId           String
-  pageId           String
-  conversationId   String
-  type             String                   @default("INBOX")
-  customerId       String?
-  linkStatus       String                   @default("unlinked")
-  sourceCustomerId String?
-  pageCustomerId   String?
-  psid             String?
-  customerName     String
-  customerPhone    String?
-  phoneTail        String?
-  snippet          String?
-  seen             Boolean                  @default(false)
-  isReplied        Boolean                  @default(false)
-  canInbox         Boolean                  @default(true)
-  messageCount     Int                      @default(0)
-  assigneeIds      String[]                 @default([])
-  tags             Json                     @default("[]")
-  version          Int?
-  messagesComplete Boolean                  @default(false)
-  nextMessageCount Int                      @default(0)
-  sourceInsertedAt DateTime?
-  sourceUpdatedAt  DateTime
-  fetchedAt        DateTime
-  raw              Json                     @default("{}")
-  shop             PancakeShop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  page             PancakePage              @relation(fields: [shopId, pageId], references: [shopId, pageId], onDelete: Cascade)
-  customer         PancakeCustomer?         @relation(fields: [shopId, customerId], references: [shopId, customerId], onDelete: SetNull)
-  messages         PancakeMessage[]
-  outboundMessages PancakeOutboundMessage[]
-
-  @@id([shopId, pageId, conversationId])
-  @@index([shopId, customerId, sourceUpdatedAt])
-  @@index([shopId, sourceUpdatedAt])
-  @@index([shopId, pageId, sourceUpdatedAt])
-  @@index([shopId, linkStatus, sourceUpdatedAt])
-  @@index([shopId, phoneTail])
-  @@map("pancakeConversation")
-}
-
-model PancakeMessage {
-  shopId           String
-  pageId           String
-  conversationId   String
-  messageId        String
-  type             String              @default("INBOX")
-  senderType       String              @default("customer")
-  senderId         String?
-  senderName       String
-  staffId          String?
-  staffName        String?
-  message          String              @default("")
-  originalMessage  String?
-  attachments      Json                @default("[]")
-  hasPhone         Boolean             @default(false)
-  seen             Boolean             @default(false)
-  isRemoved        Boolean             @default(false)
-  isHidden         Boolean             @default(false)
-  parentId         String?
-  sourceInsertedAt DateTime
-  fetchedAt        DateTime
-  raw              Json                @default("{}")
-  shop             PancakeShop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  page             PancakePage         @relation(fields: [shopId, pageId], references: [shopId, pageId], onDelete: Cascade)
-  conversation     PancakeConversation @relation(fields: [shopId, pageId, conversationId], references: [shopId, pageId, conversationId], onDelete: Cascade)
-
-  @@id([shopId, pageId, conversationId, messageId])
-  @@index([shopId, pageId, conversationId, sourceInsertedAt])
-  @@map("pancakeMessage")
-}
-
-model PancakeOutboundMessage {
-  id              String              @id @default(cuid())
-  shopId          String
-  pageId          String
-  conversationId  String
-  clientMessageId String
-  action          String              @default("reply_inbox")
-  message         String
-  status          String              @default("sending")
-  remoteMessageId String?
-  errorCode       String?
-  errorMessage    String?
-  sentByUserId    String
-  attempts        Int                 @default(1)
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  shop            PancakeShop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  page            PancakePage         @relation(fields: [shopId, pageId], references: [shopId, pageId], onDelete: Cascade)
-  conversation    PancakeConversation @relation(fields: [shopId, pageId, conversationId], references: [shopId, pageId, conversationId], onDelete: Cascade)
-
-  @@unique([shopId, pageId, conversationId, clientMessageId])
-  @@index([shopId, pageId, conversationId, createdAt])
-  @@map("pancakeOutboundMessage")
-}
-
-model PancakePageWebhookEvent {
-  id             String      @id @default(cuid())
-  shopId         String
-  pageId         String
-  dedupeKey      String
-  eventType      String
-  requestId      String?
-  eventTimestamp Int?
-  version        Int?
-  status         String      @default("processed")
-  lastError      String?
-  payload        Json
-  receivedAt     DateTime    @default(now())
-  processedAt    DateTime?
-  shop           PancakeShop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  page           PancakePage @relation(fields: [shopId, pageId], references: [shopId, pageId], onDelete: Cascade)
-
-  @@unique([shopId, pageId, dedupeKey])
-  @@index([shopId, pageId, receivedAt])
-  @@map("pancakePageWebhookEvent")
 }
 
 model SlackMemberMatch {
@@ -2052,6 +1887,8 @@ model AppSetting {
   agentModelId String?
 
   agentModelContextWindow Int?
+
+  agentModelAuto Boolean @default(false)
 
   contextDevApiKey String?
 
